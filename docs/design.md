@@ -26,8 +26,8 @@ nothing powerful needs a different tool.
                         typesafe-sdk  →  Jev
 ```
 
-Helpers build throwaway topics and call the same engine, so behaviour
-(budget, failure policy, provenance) is identical at every layer.
+Helpers call the same `Judge` backend and question-wording module as
+topics, without building a topic (no membership question is wasted).
 
 ## Core concepts
 
@@ -302,11 +302,19 @@ the app:
 - One Noul per topic for membership (several can match).
 - Field values are selected from candidates, never generated.
 - Goals: easy, extensible, powerful (three layers above).
+- Python ≥ 3.10.
+- Helper names `choose` / `check` / `rate`.
+- Question instructions are JSON objects: an optional `premise` (for
+  speculative facets), the `task`, facet details, and the `topic` block
+  (`name`, `description`, `does_not_include`). Membership adds
+  `examples` as `belongs` / `does_not_belong`.
+- A field with no candidates is not asked; it counts as "none of these"
+  and the result carries a warning.
+- `Content(candidates=...)` is keyed topic → field; topic `"*"` applies
+  to every topic. `Content(context=...)` is sent as state beside `content`.
 
 ## Open questions
 
-- Python floor: 3.10 (matches `typesafe-sdk`, wider reach) vs 3.12
-  (nicer typing)? Proposed: 3.10.
 - Speculative facets vs a second request: speculative is one round trip
   but more input tokens per topic. Measure with 5–10 topics; maybe make
   it a per-topic switch.
@@ -317,7 +325,25 @@ the app:
   array) out of the box?
 - Default extractors: ship `org` / `title` in core, or as a separate
   extra since they're English- and domain-flavoured?
-- Naming: `choose` / `check` / `rate` for helpers — clear enough?
+
+## Status
+
+Built (0.1.0.dev0):
+
+- `Topic`: validation (all problems at once, typo hints), warnings,
+  YAML / JSON / dict loading, round-trip, version.
+- `Filter.judge` and `explain`, single request; facets: membership,
+  flat categories, fields (from supplied candidates), scores, flags,
+  composites, `when`, custom facets (`NoulFacet` / `ChoiceFacet` /
+  `ScoreFacet`).
+- `ThresholdPolicy`; failure policy (`raise` / `review` / fallback judge).
+- `Result` / `TopicResult` `to_dict` / `from_dict`.
+- `JevJudge`, `FakeJudge`; helpers `choose` / `check` / `rate`.
+
+Not yet: packing / splitting, `Budget`, `match_item`, `track.*`,
+`AsyncFilter`, judging nested categories (parsed, but rejected at judge
+time), extractors, `KeywordJudge`, record / replay, CLI, eval. Not yet run
+against live Jev.
 
 ## Testing approach
 

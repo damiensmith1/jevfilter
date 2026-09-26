@@ -93,8 +93,8 @@ definition schema and [api](api.md) for usage.
 
 ## Non-functional
 
-- Python ≥ 3.10 (matches `typesafe-sdk`) — proposed.
-- Core depends only on `typesafe-sdk` and `pydantic`. YAML, CLI and eval
+- Python ≥ 3.10 (matches `typesafe-sdk`).
+- Core depends only on `typesafe-sdk`. YAML, CLI and eval
   extras are optional installs (`jevfilter[yaml]`, `[cli]`, `[eval]`).
 - **Stateless:** no storage, no cache, no hooks, no files written (except
   test cassettes when explicitly recording), no network except the

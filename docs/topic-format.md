@@ -60,7 +60,7 @@ categories:
   offer: Extends an offer or discusses offer terms.
 
 fields:
-  company: {kind: org, about: The hiring company, not a job board or ATS., required: true}
+  company: {kind: org, about: "The hiring company, not a job board or ATS.", required: true}
   role: {kind: title, about: The job title.}
 
 flags:

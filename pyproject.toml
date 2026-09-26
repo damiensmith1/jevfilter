@@ -1,0 +1,41 @@
+[project]
+name = "jevfilter"
+version = "0.1.0.dev0"
+description = "Judge content against plain-English topic definitions with TypeSafe's Jev."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Damien Smith" }]
+keywords = ["jev", "typesafe", "classification", "filter", "llm"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Typing :: Typed",
+]
+dependencies = ["typesafe-sdk>=0.7.1,<0.8"]
+
+[project.optional-dependencies]
+yaml = ["pyyaml>=6"]
+
+[project.urls]
+Repository = "https://github.com/damiensmith1/jevfilter"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6", "pyyaml>=6"]
+
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

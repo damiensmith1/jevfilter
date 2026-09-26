@@ -1,7 +1,7 @@
 ---
 title: API
 tags: [jevfilter, api]
-status: draft — proposed, not implemented
+status: draft — partly implemented (see design → Status)
 ---
 
 # API by example
