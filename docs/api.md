@@ -13,7 +13,7 @@ the internals and [topic-format](topic-format.md) for definitions.
 
 ```sh
 pip install jevfilter            # core
-pip install "jevfilter[yaml,cli,eval]"
+pip install "jevfilter[yaml]"      # YAML topic files
 export TYPESAFE_API_KEY=...
 ```
 
@@ -226,15 +226,47 @@ r = Filter(topics, judge=fake).judge("...")
 Record once, replay forever:
 
 ```python
-judge = RecordingJudge(JevJudge(), path="tests/cassettes/jobs.jsonl")
-judge = ReplayJudge("tests/cassettes/jobs.jsonl")
+from jevfilter.judges import JevJudge, RecordingJudge, ReplayJudge
+
+judge = RecordingJudge(JevJudge(), "tests/cassettes/jobs.jsonl")  # calls Jev only for new requests
+judge = ReplayJudge("tests/cassettes/jobs.jsonl")                  # never calls Jev
 ```
+
+A cassette is JSONL keyed by a hash of each request's exact state and
+questions. It contains the content that was judged, so don't commit
+cassettes recorded from private data.
+
+## Evaluate
+
+Label some examples (JSONL), then score your topics and sweep thresholds:
+
+```json
+{"content": {...}, "candidates": {"Jobs": {"company": ["Acme"]}},
+ "expected": {"Jobs": {"match": true, "category": "applied", "fields": {"company": "Acme"}}}}
+```
+
+```python
+from jevfilter.eval import evaluate, load_examples
+
+report = evaluate(f, load_examples("labelled.jsonl"), sweep=True)
+print(report.format())      # precision, recall, review rate, category accuracy,
+report.to_dict()            # calibration, cost, and the best threshold trade-offs
+```
+
+A topic missing from `expected` should not match. Use a `RecordingJudge`
+so re-running (or passing `results=` from a previous run) costs nothing.
 
 ## CLI
 
 ```sh
-jevfilter try topics/ "Your application was sent to Acme"
-jevfilter explain topics/ email.txt
-jevfilter lint topics/
-jevfilter eval topics/ labelled.jsonl --sweep
+jevfilter try topics/ "Your application was sent to Acme" --candidates '{"Jobs": {"company": ["Acme"]}}'
+jevfilter try topics/ --file email.json --json          # .json files are parsed
+jevfilter explain topics/ --file email.json --payloads  # requests + cost; sends nothing
+jevfilter lint topics/                                  # exit 2 on invalid topics
+jevfilter eval topics/ labelled.jsonl --sweep --record runs/cassette.jsonl
+jevfilter eval topics/ labelled.jsonl --replay runs/cassette.jsonl   # free re-run
 ```
+
+Options for `try` / `eval`: `--model`, `--max-usd` (spend cap),
+`--record` / `--replay`, `--env-file .env` (the only way the CLI reads a
+`.env`), `--json`.

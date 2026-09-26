@@ -1,6 +1,6 @@
 [project]
 name = "jevfilter"
-version = "0.2.0"
+version = "0.3.0"
 description = "Filter anything with plain-English rules, powered by TypeSafe's Jev."
 readme = "README.md"
 license = "MIT"
@@ -18,6 +18,9 @@ dependencies = ["typesafe-sdk>=0.7.1,<0.8"]
 
 [project.optional-dependencies]
 yaml = ["pyyaml>=6"]
+
+[project.scripts]
+jevfilter = "jevfilter.cli:main"
 
 [project.urls]
 Repository = "https://github.com/damiensmith1/jevfilter"

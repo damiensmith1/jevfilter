@@ -99,6 +99,18 @@ See [docs/topic-format.md](docs/topic-format.md) for every topic option
 (scores, composites, `when`, thresholds, `meta`) and [docs/api.md](docs/api.md)
 for the rest of the API.
 
+## Command line
+
+```sh
+jevfilter try topics/ "Your application to Acme was received"
+jevfilter explain topics/ --file email.json    # requests + cost, sends nothing
+jevfilter lint topics/
+jevfilter eval topics/ labelled.jsonl --sweep --record runs/cassette.jsonl
+```
+
+`eval` scores your topics against labelled examples (precision, recall,
+review rate, calibration) and shows which thresholds trade off best.
+
 ## Testing without an API key
 
 ```python
@@ -107,6 +119,9 @@ from jevfilter.judges import FakeJudge
 fake = FakeJudge({"Jobs/membership": 0.95, "Jobs/categories": "applied"})
 r = jf.Filter(topics, judge=fake).judge("...")
 ```
+
+Or record real answers once and replay them: `RecordingJudge` /
+`ReplayJudge` in `jevfilter.judges`.
 
 ## Development
 

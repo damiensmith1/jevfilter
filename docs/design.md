@@ -249,21 +249,37 @@ choose to re-judge — e.g. the Gmail app's "rescan after editing a topic".
 
 ## Evaluation
 
-`jevfilter.eval` (extra `[eval]`) runs topics over a labelled dataset
-(JSONL: content + expected topics / categories / fields) and reports:
-per-topic precision / recall, category confusion, calibration (reliability
-buckets), review rate, cost — and a threshold sweep showing
-accuracy vs review rate. Uses `RecordingJudge` so re-running a sweep
+`jevfilter.eval` runs topics over a labelled dataset (JSONL: content,
+optional candidates, and expected match / category / fields per topic; a
+topic not listed is expected not to match) and reports, per topic and
+overall:
+
+- membership: precision over automatic matches, recall (a positive sent
+  to review counts as not yet found), review rate, accuracy of automatic
+  decisions
+- category confusion and accuracy; per-field accuracy
+- calibration: 10 reliability buckets, Brier score, ECE
+- cost, tokens, requests
+- optional threshold sweep (accept × reject grid, reject ≤ accept),
+  re-deciding membership from stored probabilities with no new calls;
+  `format()` shows only the non-dominated rows
+
+Backend errors are left out of calibration and the sweep. Pass
+`results=` to re-score a previous run; use `RecordingJudge` so re-running
 costs nothing.
 
 ## CLI
 
-Extra `[cli]`:
+Installed with the package (argparse, no extra dependencies):
 
 - `jevfilter try topics/ "some text"` — judge text, pretty-print result
-- `jevfilter explain topics/ file.txt` — show payloads + cost estimate
-- `jevfilter lint topics/` — validate and warn
-- `jevfilter eval topics/ data.jsonl` — evaluation report
+- `jevfilter explain topics/ --file email.json` — payloads + cost; sends nothing
+- `jevfilter lint topics/` — validate and warn (exit 2 on errors)
+- `jevfilter eval topics/ data.jsonl --sweep` — evaluation report
+
+`try` / `eval` take `--model`, `--max-usd`, `--record` / `--replay`,
+`--json`, and `--env-file` (the CLI reads a `.env` only when told to).
+Exit codes: 0 ok, 1 backend / budget error, 2 invalid input.
 
 ## Package layout
 
@@ -278,13 +294,13 @@ src/jevfilter/
   engine.py        pipeline, Filter / AsyncFilter
   policy.py        ThresholdPolicy, Decision, reasons
   result.py        Result, TopicResult, provenance
-  judges/          jev, fake, keyword, recording, fallback
+  judges/          jev (sync + async), fake, recording / replay
   extract/         extractors + registry
   items.py         match_item
   track.py         tracking rules
   budget.py  errors.py
-  eval/            (extra)
-  cli.py           (extra)
+  eval.py          evaluation + threshold sweep
+  cli.py           jevfilter command
 tests/  examples/  docs/
 ```
 
@@ -349,6 +365,10 @@ the app:
 - `match_item` asks Jev even when one item survives the pre-filter.
 - `AsyncFilter` accepts sync judges (run in a thread); `AsyncJevJudge`
   keeps one client per event loop.
+- CLI and eval ship in the core package: they need no extra
+  dependencies, so `[cli]` / `[eval]` extras would only add friction.
+- `RecordingJudge` wraps sync judges only and replays requests it has
+  already recorded (pay only for new ones); `ReplayJudge` never calls out.
 
 ## Open questions
 
@@ -392,8 +412,16 @@ Added in 0.2.0:
 - Live tests for item matching and an async batch under a budget, passed
   on `jev-1.13.0`.
 
+Added in 0.3.0:
+
+- `RecordingJudge` / `ReplayJudge` (JSONL cassettes).
+- `jevfilter.eval`: metrics, calibration, threshold sweep.
+- `jevfilter` CLI: `try`, `explain`, `lint`, `eval`.
+- Checked live on `jev-1.13.0`: CLI `try`, and `eval` recorded then
+  replayed with no API calls.
+
 Not yet: judging nested categories (parsed, but rejected at judge time),
-extractors, `KeywordJudge`, record / replay, CLI, eval.
+extractors, `KeywordJudge` / `FallbackJudge`.
 
 ## Testing approach
 
