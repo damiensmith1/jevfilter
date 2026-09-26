@@ -18,6 +18,7 @@ PyPI as `jevfilter`. First consumer: `jev-gmail-filter`, a Gmail app.
 - Project docs: everything under `docs/` — background, requirements,
   design, `topic-format.md` (language-neutral definition schema),
   `api.md` (usage by example; see design.md "Status" for what's built).
+  `releasing.md` (how to publish to PyPI).
 - Goals: **easy** (three-line start), **extensible** (every part a small
   protocol), **powerful** (fan-out, hierarchies, scores, items, eval).
 
@@ -30,6 +31,8 @@ PyPI as `jevfilter`. First consumer: `jev-gmail-filter`, a Gmail app.
 - `TYPESAFE_API_KEY` lives in `.env` (gitignored). Never log or commit it.
 - Tests stub Jev. Live tests are opt-in and never run in CI.
 - Commits are atomic and explain *why*. No co-author trailers.
+- `main` is protected by a ruleset (PR + code-owner review + green CI);
+  only the repo admin bypasses it. See CONTRIBUTING.md.
 
 ## Keeping docs in sync
 
