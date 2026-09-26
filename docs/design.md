@@ -103,8 +103,10 @@ be tuned and evaluated centrally; a facet may override its template.
 ### Packing and splitting
 
 Jev limits: 64k tokens per request (state + all questions); 32k for state
-+ the longest question. The planner estimates tokens as characters ÷ 4
-with a 0.9 safety margin (`Limits`), and first-fit packs questions, in
++ the longest question. The planner estimates tokens as JSON characters
+÷ 2.7 (calibrated on recorded `jev-1.13.0` requests, where ÷4
+under-counted by 40–50%; now within ~5%, erring high) with a 0.9 safety
+margin (`Limits`), and first-fit packs questions, in
 order, into as few requests as possible, resending the state per request.
 State over its budget is truncated per `truncate=`: `head` (default)
 repeatedly shortens the longest string in the state, `head_tail` keeps
@@ -114,6 +116,16 @@ carries a warning. A single question over the limit is an error.
 If any request for a piece of content fails, the failure policy applies
 to the whole piece (a fallback judge re-asks every request). `AsyncFilter`
 sends a piece's requests concurrently.
+
+### Speculative vs staged
+
+`Filter(speculative=True)` (default) asks every facet in the first
+request. `speculative=False` runs two stages: membership (plus any facet
+with `when: always`) first, then the remaining questions only for topics
+whose membership is at or above their `reject` threshold (match or
+review). Same wording, same outcomes; fewer tokens when most content
+matches nothing, at the cost of a second round trip. A failed second
+stage fails the whole piece (per `on_error`).
 
 ### Hierarchical categories
 
@@ -198,7 +210,7 @@ All are small `typing.Protocol`s; built-ins are ordinary implementations.
 
 | Protocol | Method(s) | Built-ins |
 |----------|-----------|-----------|
-| `Judge` | `ask(state, questions) -> Answers` (+ async) | `JevJudge`, `FakeJudge` (scripted), `KeywordJudge`, `RecordingJudge` / `ReplayJudge`, `FallbackJudge(primary, secondary)` |
+| `Judge` | `ask(state, questions) -> Answers` (+ async) | `JevJudge` / `AsyncJevJudge`, `FakeJudge` (scripted), `RecordingJudge` / `ReplayJudge`, `FallbackJudge(primary, secondary)` |
 | `Facet` | `questions(topic, content)`, `interpret(answers)` | membership, categories, fields, scores, flags |
 | `Extractor` | `extract(content, field) -> list[str]` | `org`, `title`, `email`, `known_values` (registry by field `kind`) |
 | `Policy` | `decide(topic, answers)` | `ThresholdPolicy` |
@@ -233,7 +245,7 @@ refusals in place so the rest of a batch survives.
 
 - `"raise"` (default) — propagate a typed `JudgeError`
 - `"review"` — every topic `review` with reason `backend_error`
-- a `Judge` — fall back to it (e.g. `KeywordJudge`), results marked
+- a `Judge` — fall back to it, results marked
   `degraded=True`
 
 The SDK already retries 429s with backoff and honours `retry-after`;
@@ -369,23 +381,30 @@ the app:
   dependencies, so `[cli]` / `[eval]` extras would only add friction.
 - `RecordingJudge` wraps sync judges only and replays requests it has
   already recorded (pay only for new ones); `ReplayJudge` never calls out.
+- Token estimate: JSON characters ÷ 2.7, calibrated against billed usage.
+- `speculative=False` is an option, not the default: it trades a second
+  round trip for fewer tokens, and that trade depends on the caller.
+- No `KeywordJudge`: keyword guesses are worse than `on_error="review"`.
+  `FallbackJudge(primary, secondary)` covers real fallbacks (e.g. a
+  pinned model → `jev-latest`) and marks results `degraded`.
+- Categories accept `examples` / `exclude` like topics do; plain
+  categories produce identical questions, so `WORDING_VERSION` is
+  unchanged.
 
 ## Open questions
 
-- Speculative facets vs a second request: speculative is one round trip
-  but more input tokens per topic. Measure with 5–10 topics; maybe make
-  it a per-topic switch.
-- Token estimation: chars ÷ 4 heuristic, or is there a count endpoint?
-- Is `KeywordJudge` good enough to ship as a fallback, or only as a
-  test fake?
+- Staged mode saved 31% of billed tokens on a 10-email mix (3 matching)
+  with identical accuracy. Should it become the default, or a per-topic
+  switch? Needs latency numbers and a larger real mix.
 - Should `Content` support multi-part state (e.g. an email thread as an
   array) out of the box?
-- Default extractors: ship `org` / `title` in core, or as a separate
-  extra since they're English- and domain-flavoured?
+- Built-in extractors (planned): only generic kinds (`email`, `url`,
+  `known_values`, `regex`) in core; `org` / `title` are English- and
+  domain-flavoured, so consumers keep their own?
 
 ## Status
 
-Built (0.1.0, plus 0.2.0 below):
+Built (0.1.0, plus 0.2.0–0.4.0 below):
 
 - `Topic`: validation (all problems at once, typo hints), warnings,
   YAML / JSON / dict loading, round-trip, version.
@@ -420,8 +439,21 @@ Added in 0.3.0:
 - Checked live on `jev-1.13.0`: CLI `try`, and `eval` recorded then
   replayed with no API calls.
 
+Added in 0.4.0:
+
+- Calibrated token estimate (÷ 2.7).
+- `speculative=False` two-stage judging; `Plan.followup_requests` /
+  `max_cost_usd`; CLI `--staged`.
+- Category `examples` / `exclude`.
+- `FallbackJudge`.
+- Checked live on `jev-1.13.0`: estimates within 0–5% of billed tokens;
+  staged mode 31% fewer billed tokens with identical accuracy on a
+  10-email mix; category examples moved "thanks for applying" from
+  recruiter (0.63) to applied (0.99).
+
 Not yet: judging nested categories (parsed, but rejected at judge time),
-extractors, `KeywordJudge` / `FallbackJudge`.
+extractors (generic ones only: `email`, `url`, `known_values`, `regex`),
+multi-part content (e.g. threads).
 
 ## Testing approach
 

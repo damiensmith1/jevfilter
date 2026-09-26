@@ -132,3 +132,12 @@ def test_version(capsys):
     with pytest.raises(SystemExit):
         cli.main(["--version"])
     assert "jevfilter" in capsys.readouterr().out
+
+
+def test_staged_flag(capsys, fake_jev):
+    code, out, _ = run(capsys, "explain", TOPICS, "hello", "--staged")
+    assert code == 0 and "request 1: Jobs/membership, Receipts/membership" in out
+    assert "only for topics that may match" in out
+    before = len(fake_jev.calls)
+    run(capsys, "try", TOPICS, "hello", "--staged")
+    assert len(fake_jev.calls) - before == 2  # Jobs passes membership (0.95), so a follow-up

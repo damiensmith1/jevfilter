@@ -112,9 +112,9 @@ class ScoresFacet:
     ) -> dict[str, Score]:
         out = {}
         for name, spec in topic.scores.items():
-            a = answers[name]
-            assert isinstance(a, ScoreAnswer)
-            out[name] = to_score(a, spec.levels)
+            a = answers.get(name)  # unasked in the second stage when the topic didn't pass
+            if isinstance(a, ScoreAnswer):
+                out[name] = to_score(a, spec.levels)
         return out
 
 
@@ -130,9 +130,9 @@ class FlagsFacet:
     ) -> dict[str, float]:
         out = {}
         for name in topic.flags:
-            a = answers[name]
-            assert isinstance(a, NoulAnswer)
-            out[name] = a.p
+            a = answers.get(name)  # unasked in the second stage when the topic didn't pass
+            if isinstance(a, NoulAnswer):
+                out[name] = a.p
         return out
 
 

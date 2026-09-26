@@ -28,7 +28,7 @@ That's a complete topic: one membership question.
 | `description` | string \| object | yes | What belongs, in plain English. |
 | `exclude` | string \| list | no | What looks similar but doesn't belong. |
 | `examples` | object | no | `{match: [...], no: [...]}` short examples, included in the membership question. |
-| `categories` | map | no | name → description (string) or nested `{description, children}`. |
+| `categories` | map | no | name → description (string) or `{description, examples, exclude, children}`. |
 | `fields` | map | no | name → `{kind, about, required}`. Values selected from candidates. |
 | `scores` | map | no | name → `{about, levels: [...]}`, levels low → high. |
 | `composites` | map | no | name → `{score_name: weight, ...}`. Computed in code. |
@@ -113,6 +113,23 @@ categories:
 ```
 
 A result reports the leaf and the full path (`hardware/laptop`).
+
+Any category can also be a mapping with `examples` and `exclude`, to
+separate categories that are easily confused:
+
+```yaml
+categories:
+  applied:
+    description: Confirms I submitted an application.
+    examples: [Thanks for applying, We received your application]
+  recruiter:
+    description: A recruiter reaches out about a role.
+    exclude: Automatic confirmations of an application I sent.
+```
+
+Allowed keys in a category mapping: `description`, `examples` (list),
+`exclude` (text or list), `children`. A category without examples or
+exclusions is sent to Jev exactly as before.
 
 ## Fields
 

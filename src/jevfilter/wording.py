@@ -64,8 +64,20 @@ def categories(topic: Topic, options: Mapping[str, Category], speculative: bool)
     return Question(
         "choice",
         _task(topic, "Which category best describes `content`?", speculative),
-        {name: c.description for name, c in options.items()},
+        {name: _category_criterion(c) for name, c in options.items()},
     )
+
+
+def _category_criterion(c: Category) -> Any:
+    """Plain description, or an object when the category has examples / exclusions."""
+    if not c.examples and c.exclude is None:
+        return c.description
+    out: dict[str, Any] = {"description": c.description}
+    if c.examples:
+        out["examples"] = list(c.examples)
+    if c.exclude is not None:
+        out["does_not_include"] = c.exclude
+    return out
 
 
 def field(topic: Topic, spec: FieldSpec, candidates: Sequence[str], speculative: bool) -> Question:

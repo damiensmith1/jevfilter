@@ -197,3 +197,26 @@ def test_async_batch_with_budget():
     assert [r["Jobs"].outcome for r in results][:2] == ["match", "match"]
     assert results[2]["Jobs"].outcome != "match" and results[3]["Receipts"].matched
     assert budget.requests == 4
+
+
+def test_token_estimate_is_close_to_billed(live_filter):
+    content = jf.Content(APPLIED, candidates=CANDIDATES)
+    estimated = live_filter.explain(content).estimated_input_tokens
+    r = live_filter.judge(content)
+    SPEND.append(r.cost_usd or 0.0)
+    print(f"  estimated {estimated}, billed {r.input_tokens}")
+    assert 0.8 <= estimated / r.input_tokens <= 1.25
+
+
+def test_staged_matches_speculative_and_costs_less():
+    _load_env()
+    if not os.environ.get("TYPESAFE_API_KEY"):
+        pytest.skip("no TYPESAFE_API_KEY")
+    topics = jf.Topic.load(TOPICS)
+    content = jf.Content(DIGEST, candidates=CANDIDATES)
+    spec = jf.Filter(topics, judge=JevJudge()).judge(content)
+    staged = jf.Filter(topics, judge=JevJudge(), speculative=False).judge(content)
+    SPEND.extend([spec.cost_usd or 0.0, staged.cost_usd or 0.0])
+    print(f"  speculative {spec.input_tokens} tokens, staged {staged.input_tokens} tokens")
+    assert [t.outcome for t in staged] == [t.outcome for t in spec]
+    assert staged.input_tokens < spec.input_tokens

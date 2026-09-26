@@ -29,6 +29,8 @@ class Category:
     name: str
     description: Any
     children: dict[str, Category] = field(default_factory=dict)
+    examples: tuple[str, ...] = ()
+    exclude: Any = None
 
     @property
     def is_leaf(self) -> bool:
@@ -342,15 +344,27 @@ class _Validator:
             if not _valid_item_name(name):
                 self.err(f"`{where}` has an invalid name {name!r} (text, no '/')")
                 continue
-            if isinstance(value, Mapping) and "children" in value:
-                extra = set(value) - {"description", "children"}
+            if isinstance(value, Mapping):
+                here = f"{where}.{name}"
+                extra = set(value) - {"description", "children", "examples", "exclude"}
                 if extra:
-                    self.err(f"`{where}.{name}` has unknown keys {sorted(extra)}")
+                    self.err(f"`{here}` has unknown keys {sorted(extra)}")
                 desc = value.get("description")
-                children = self._category_level(value["children"], f"{where}.{name}.children")
-                out[name] = Category(name, desc, children)
+                examples = value.get("examples", [])
+                if not _is_text_list(examples):
+                    self.err(f"`{here}.examples` must be a list of text")
+                    examples = []
+                exclude = value.get("exclude")
+                if exclude is not None and not (_is_text(exclude) or _is_text_list(exclude)):
+                    self.err(f"`{here}.exclude` must be text or a list of text")
+                children = (
+                    self._category_level(value["children"], f"{here}.children")
+                    if "children" in value
+                    else {}
+                )
+                out[name] = Category(name, desc, children, tuple(examples), exclude)
             else:
-                desc = value.get("description") if isinstance(value, Mapping) else value
+                desc = value
                 out[name] = Category(name, desc)
             if isinstance(desc, str):
                 if desc in seen:

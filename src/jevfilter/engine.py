@@ -63,6 +63,14 @@ class _Batch:
     degraded: bool = False
     error: str | None = None
 
+    def __post_init__(self) -> None:
+        # A FallbackJudge marks answers it had to get from its secondary.
+        if any(r.extra.get("fallback") for r in self.responses):
+            self.degraded = True
+            if self.error is None:
+                errors = [r.extra.get("primary_error") for r in self.responses]
+                self.error = next((e for e in errors if e), None)
+
     @property
     def failed(self) -> bool:
         return self.error is not None and not self.responses
@@ -102,6 +110,11 @@ class Plan:
     estimated_input_tokens: int
     cost_usd: float
     warnings: tuple[str, ...] = ()
+    followup_requests: list[dict[str, Any]] = field(default_factory=list)
+    """With `speculative=False`: the second-stage requests if every topic
+    passed membership (the worst case). Only matching topics are asked."""
+    max_cost_usd: float = 0.0
+    """`cost_usd` plus every follow-up request."""
 
 
 class Filter:
@@ -125,6 +138,7 @@ class Filter:
         truncate: Truncate = "head",
         price_per_mtok: float | None = None,
         include_requests: bool = False,
+        speculative: bool = True,
     ):
         self.topics = as_topics(topics)
         if not self.topics:
@@ -141,6 +155,7 @@ class Filter:
             price_per_mtok = budget.price_per_mtok if budget else DEFAULT_PRICE_PER_MTOK
         self.price_per_mtok = price_per_mtok
         self.include_requests = include_requests
+        self.speculative = speculative
 
     @property
     def backend(self) -> Any:
@@ -150,22 +165,47 @@ class Filter:
     # -- public -------------------------------------------------------------
 
     def judge(self, content: Any) -> Result:
-        """Judge one piece of content (text, a dict, or `Content`) against every topic."""
+        """Judge one piece of content (text, a dict, or `Content`) against every topic.
+
+        With `speculative=False`, membership is asked first and the other
+        facets only for topics that might belong (two round trips, fewer
+        tokens when most topics don't match).
+        """
         compiled = self._compile(as_content(content))
-        requests, warnings = self._plan(compiled)
-        return self._report(compiled, requests, warnings, self._run(requests))
+        if self.speculative:
+            requests, warnings = self._plan(compiled)
+            return self._report(compiled, requests, warnings, self._run(requests))
+        first, w1 = self._plan(compiled, self._first_stage(compiled))
+        b1 = self._run(first)
+        if b1.failed:
+            return self._report(compiled, first, w1, b1)
+        second, w2 = self._plan(compiled, self._second_stage(compiled, b1.answers))
+        b2 = self._run(second) if second else _Batch()
+        return self._report(compiled, first + second, w1 + w2, _merge(b1, b2))
 
     def explain(self, content: Any) -> Plan:
         """The exact request payloads and an estimated cost, without calling the backend."""
         compiled = self._compile(as_content(content))
-        requests, warnings = self._plan(compiled)
+        followup: list[Request] = []
+        if self.speculative:
+            requests, warnings = self._plan(compiled)
+        else:
+            first = self._first_stage(compiled)
+            requests, warnings = self._plan(compiled, first)
+            rest = {q: v for q, v in compiled.questions.items() if q not in first}
+            followup, w2 = self._plan(compiled, rest)
+            warnings += w2
         payloads = [r.payload() for r in requests]
+        extra = [r.payload() for r in followup]
         tokens = sum(estimate_tokens(p) for p in payloads)
+        extra_tokens = sum(estimate_tokens(p) for p in extra)
         return Plan(
             requests=payloads,
             estimated_input_tokens=tokens,
             cost_usd=tokens * self.price_per_mtok / 1e6,
-            warnings=tuple(compiled.warnings + warnings),
+            warnings=tuple(dict.fromkeys(compiled.warnings + warnings)),
+            followup_requests=extra,
+            max_cost_usd=(tokens + extra_tokens) * self.price_per_mtok / 1e6,
         )
 
     def match_item(
@@ -207,8 +247,38 @@ class Filter:
                     compiled.warnings.extend(warn(t, content))
         return compiled
 
-    def _plan(self, compiled: _Compiled) -> tuple[list[Request], list[str]]:
-        return plan_requests(compiled.state, compiled.questions, self.limits, self.truncate)
+    def _plan(
+        self, compiled: _Compiled, questions: Mapping[str, Question] | None = None
+    ) -> tuple[list[Request], list[str]]:
+        qs = compiled.questions if questions is None else questions
+        return plan_requests(compiled.state, qs, self.limits, self.truncate)
+
+    def _first_stage(self, compiled: _Compiled) -> dict[str, Question]:
+        """Membership, plus any facet marked `when: always` (not speculative)."""
+        out = {}
+        for qid, q in compiled.questions.items():
+            route = compiled.routes[qid]
+            t = self.topics[route.topic]
+            item = route.local if route.facet in ("fields", "scores", "flags") else None
+            if route.facet == "membership" or t.when_for(route.facet, item).mode == "always":
+                out[qid] = q
+        return out
+
+    def _second_stage(
+        self, compiled: _Compiled, answers: Mapping[str, Answer]
+    ) -> dict[str, Question]:
+        """The remaining questions, for topics whose membership isn't a clear no."""
+        keep = set()
+        for t in self.topics.values():
+            a = answers.get(f"{t.name}/membership")
+            reject = t.thresholds.get("reject", getattr(self.policy, "reject", 0.3))
+            if isinstance(a, NoulAnswer) and a.p >= reject:
+                keep.add(t.name)
+        return {
+            qid: q
+            for qid, q in compiled.questions.items()
+            if qid not in answers and compiled.routes[qid].topic in keep
+        }
 
     # -- 3/4. guard + execute -----------------------------------------------
 
@@ -247,7 +317,7 @@ class Filter:
         plan_warnings: list[str],
         batch: _Batch,
     ) -> Result:
-        warnings = compiled.warnings + plan_warnings
+        warnings = list(dict.fromkeys(compiled.warnings + plan_warnings))
         if batch.error:
             warnings.append(f"backend_error: {batch.error}")
         if len(batch.models) > 1:
@@ -415,8 +485,16 @@ class AsyncFilter(Filter):
 
     async def judge(self, content: Any) -> Result:  # type: ignore[override]
         compiled = self._compile(as_content(content))
-        requests, warnings = self._plan(compiled)
-        return self._report(compiled, requests, warnings, await self._run_async(requests))
+        if self.speculative:
+            requests, warnings = self._plan(compiled)
+            return self._report(compiled, requests, warnings, await self._run_async(requests))
+        first, w1 = self._plan(compiled, self._first_stage(compiled))
+        b1 = await self._run_async(first)
+        if b1.failed:
+            return self._report(compiled, first, w1, b1)
+        second, w2 = self._plan(compiled, self._second_stage(compiled, b1.answers))
+        b2 = await self._run_async(second) if second else _Batch()
+        return self._report(compiled, first + second, w1 + w2, _merge(b1, b2))
 
     async def judge_many(
         self,
@@ -490,6 +568,17 @@ class AsyncFilter(Filter):
 
 
 # -- helpers ----------------------------------------------------------------
+
+
+def _merge(first: _Batch, second: _Batch) -> _Batch:
+    """Combine two stages. If the second failed outright, the whole result fails."""
+    if second.failed:
+        return second
+    return _Batch(
+        first.responses + second.responses,
+        degraded=first.degraded or second.degraded,
+        error=first.error or second.error,
+    )
 
 
 def _facets_of(t: Topic) -> list[tuple[str, Facet, Any]]:

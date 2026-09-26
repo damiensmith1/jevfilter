@@ -11,6 +11,7 @@ from .base import (
     ScoreAnswer,
 )
 from .fake import FakeJudge
+from .fallback import FallbackJudge
 from .jev import AsyncJevJudge, JevJudge
 from .recording import RecordingJudge, ReplayJudge, request_key
 
@@ -20,6 +21,7 @@ __all__ = [
     "AsyncJudge",
     "ChoiceAnswer",
     "FakeJudge",
+    "FallbackJudge",
     "JevJudge",
     "Judge",
     "NoulAnswer",

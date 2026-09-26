@@ -61,7 +61,15 @@ def _parser() -> argparse.ArgumentParser:
             sp.add_argument("--candidates", help='JSON: {"Topic": {"field": ["value", ...]}}')
         sp.add_argument("--json", action="store_true", help="print JSON")
 
+    def staged(sp: argparse.ArgumentParser) -> None:
+        sp.add_argument(
+            "--staged",
+            action="store_true",
+            help="ask membership first, other questions only for topics that may match",
+        )
+
     def backend(sp: argparse.ArgumentParser) -> None:
+        staged(sp)
         sp.add_argument("--model", help="pin a model version, e.g. jev-1.13.0")
         sp.add_argument("--max-usd", type=float, help="refuse to spend more than this")
         sp.add_argument("--env-file", help="load TYPESAFE_API_KEY from this file")
@@ -77,6 +85,7 @@ def _parser() -> argparse.ArgumentParser:
     x = sub.add_parser("explain", help="show the requests and estimated cost; sends nothing")
     common(x)
     x.add_argument("--payloads", action="store_true", help="print the full request payloads")
+    staged(x)
     x.set_defaults(run=_explain)
 
     lint = sub.add_parser("lint", help="validate topic files and show warnings")
@@ -106,13 +115,16 @@ def _try(args: argparse.Namespace) -> int:
 
 
 def _explain(args: argparse.Namespace) -> int:
-    plan = Filter(Topic.load(args.topics), judge=_Refuse()).explain(_content(args))
+    f = Filter(Topic.load(args.topics), judge=_Refuse(), speculative=not args.staged)
+    plan = f.explain(_content(args))
     if args.json:
         _print_json(
             {
                 "requests": plan.requests,
                 "estimated_input_tokens": plan.estimated_input_tokens,
                 "cost_usd": plan.cost_usd,
+                "followup_requests": plan.followup_requests,
+                "max_cost_usd": plan.max_cost_usd,
                 "warnings": list(plan.warnings),
             }
         )
@@ -123,6 +135,11 @@ def _explain(args: argparse.Namespace) -> int:
     )
     for i, req in enumerate(plan.requests, 1):
         print(f"  request {i}: {', '.join(req['questions'])}")
+    if plan.followup_requests:
+        print(
+            f"then, only for topics that may match: up to {len(plan.followup_requests)} "
+            f"more request(s), ~${plan.max_cost_usd:.6f} total at most"
+        )
     for w in plan.warnings:
         print(f"warning: {w}")
     if args.payloads:
@@ -168,7 +185,7 @@ def _filter(args: argparse.Namespace) -> Filter:
     else:
         judge = JevJudge(model=args.model)
     budget = Budget(usd=args.max_usd) if args.max_usd is not None else None
-    return Filter(Topic.load(args.topics), judge=judge, budget=budget)
+    return Filter(Topic.load(args.topics), judge=judge, budget=budget, speculative=not args.staged)
 
 
 def _content(args: argparse.Namespace) -> Content:

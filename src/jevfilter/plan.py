@@ -1,8 +1,9 @@
 """Packing questions into requests that fit Jev's context limits.
 
 Jev allows 64k tokens per request (state + every question) and 32k for the
-state plus the longest question. Tokens are estimated as characters ÷ 4 with
-a safety margin, questions are packed first-fit in order, and the state is
+state plus the longest question. Tokens are estimated from JSON characters
+(calibrated against Jev's reported usage) with a safety margin, questions
+are packed first-fit in order, and the state is
 resent with each request. State that can't fit is truncated per `truncate`,
 with a warning.
 """
@@ -50,9 +51,15 @@ class Request:
         }
 
 
-def estimate_tokens(obj: Any) -> int:
-    """Rough input-token estimate: characters of the JSON ÷ 4."""
-    return len(json.dumps(obj, ensure_ascii=False)) // 4 + 1
+CHARS_PER_TOKEN = 2.7
+"""JSON characters per Jev input token. Measured on recorded requests
+(`jev-1.13.0`): the usual ÷4 rule under-counted by 40–50%, because JSON
+payloads are heavy in punctuation and short keys."""
+
+
+def estimate_tokens(obj: Any, chars_per_token: float = CHARS_PER_TOKEN) -> int:
+    """Input-token estimate from the JSON length."""
+    return int(len(json.dumps(obj, ensure_ascii=False)) / chars_per_token) + 1
 
 
 def plan_requests(
@@ -125,7 +132,7 @@ def _truncate(state: Any, max_tokens: int, how: Truncate) -> Any:
         path, text = _longest_string(state)
         if path is None or not text:
             break
-        keep = max(len(text) - excess * 4 - 16, 0)
+        keep = max(len(text) - int(excess * CHARS_PER_TOKEN) - 16, 0)
         if path == ():
             state = _cut(text, keep, how)
         else:
