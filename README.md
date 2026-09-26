@@ -15,7 +15,7 @@ You get plain results back and store them however you like.
 ## Install
 
 ```sh
-pip install "jevfilter[yaml] @ git+https://github.com/damiensmith1/jevfilter"
+pip install "jevfilter[yaml]"
 export TYPESAFE_API_KEY=...
 ```
 

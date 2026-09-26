@@ -1,6 +1,6 @@
 [project]
 name = "jevfilter"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Judge content against plain-English topic definitions with TypeSafe's Jev."
 readme = "README.md"
 license = "MIT"
@@ -39,3 +39,6 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [".github"]

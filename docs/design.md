@@ -267,9 +267,11 @@ tests/  examples/  docs/
 - `pyproject.toml`, src layout, `py.typed`. Built and published with
   **uv** (`uv build`, `uv publish`).
 - GitHub Actions: lint + tests on push; publish to PyPI on version tag
-  via **trusted publishing** (no stored token). TestPyPI first.
+  via **trusted publishing** (no stored token). TestPyPI skipped: CI and
+  the release workflow check the build, and a bad release is fixed with a
+  new version.
 - SemVer; 0.x until `jev-gmail-filter` (a Gmail app built on this library) has run on it for real.
-- Reserve the PyPI name early with a minimal 0.0.1.
+- First release is 0.1.0 (no separate 0.0.1 name reservation).
 
 ## Consumer check: jev-gmail-filter
 
@@ -331,7 +333,7 @@ the app:
 
 ## Status
 
-Built (0.1.0.dev0):
+Built (0.1.0):
 
 - `Topic`: validation (all problems at once, typo hints), warnings,
   YAML / JSON / dict loading, round-trip, version.
@@ -344,12 +346,14 @@ Built (0.1.0.dev0):
 - `JevJudge`, `FakeJudge`; helpers `choose` / `check` / `rate`.
 - `jf.configure()` for the default judge / API key.
 - CI (GitHub Actions): ruff, tests on Python 3.10–3.13, `uv build`.
+- Release workflow: a `v*` tag checks the version, tests, builds, scans
+  the built files for secrets / local paths, then publishes via PyPI
+  trusted publishing (environment `pypi`). TestPyPI skipped.
 - Opt-in live tests (`JEVFILTER_LIVE=1`); passed on `jev-1.13.0`.
 
 Not yet: packing / splitting, `Budget`, `match_item`, `track.*`,
 `AsyncFilter`, judging nested categories (parsed, but rejected at judge
-time), extractors, `KeywordJudge`, record / replay, CLI, eval, the
-PyPI publish workflow.
+time), extractors, `KeywordJudge`, record / replay, CLI, eval.
 
 ## Testing approach
 

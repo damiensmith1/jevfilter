@@ -1,0 +1,66 @@
+name: Release
+
+# Publishes to PyPI when a version tag (e.g. v0.1.0) is pushed. Uses PyPI
+# trusted publishing: no token is stored; PyPI trusts this workflow file in
+# this repo, running in the `pypi` environment.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+
+      - name: Check the tag matches the package version
+        run: |
+          version=$(uv version --short)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME doesn't match pyproject version $version"; exit 1
+          fi
+
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+      - run: uv build
+
+      - name: Check the built files for secrets and local paths
+        run: |
+          mkdir -p inspect
+          for f in dist/*.tar.gz; do tar -xzf "$f" -C inspect; done
+          for f in dist/*.whl; do unzip -q -o "$f" -d inspect/wheel; done
+          if find inspect -name '.env*' -o -name '*.pem' -o -name '*.key' | grep .; then
+            echo "Secret-looking file in the package"; exit 1
+          fi
+          if grep -rInE '(/Users/|/home/runner|TYPESAFE_API_KEY *= *[A-Za-z0-9])' inspect; then
+            echo "Local path or API key in the package"; exit 1
+          fi
+
+      - name: Check the package installs and imports
+        run: |
+          uv run --isolated --no-project --with dist/*.whl \
+            python -c "import jevfilter; print(jevfilter.__version__)"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # lets PyPI verify this workflow; nothing else
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: astral-sh/setup-uv@v10.2.0
+      - run: uv publish --trusted-publishing always
