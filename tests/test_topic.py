@@ -149,3 +149,107 @@ def test_custom_facet_key_allowed_once_registered():
 def test_reserved_facet_names():
     with pytest.raises(ValueError):
         jf.facet("categories")
+
+
+@pytest.mark.parametrize(
+    "data, message",
+    [
+        ({"name": ""}, "`name` is required"),
+        ({"name": "T", "description": "   "}, "`description` is required"),
+        ({"name": "T", "description": 3}, "must be text or a mapping"),
+        ({"exclude": 5}, "`exclude` must be text"),
+        ({"examples": {"match": "one"}}, "`examples.match` must be a list"),
+        ({"categories": {}}, "non-empty mapping"),
+        ({"categories": {"a/b": "x", "c": "y"}}, "invalid name"),
+        (
+            {"categories": {"a": {"description": "x", "children": {"b": "B"}, "x": 1}}},
+            "unknown keys",
+        ),
+        ({"fields": {"f": "text"}}, "`fields.f` must be a mapping"),
+        ({"fields": {"f": {"size": 1}}}, "unknown keys"),
+        ({"fields": {"f": {"kind": 3}}}, "`fields.f.kind` must be text"),
+        ({"fields": ["f"]}, "`fields` must be a mapping"),
+        ({"scores": {"s": ["a", "b"]}}, "must be a mapping with `levels`"),
+        ({"scores": {"s": {"levels": ["a", "b"], "x": 1}}}, "unknown keys"),
+        ({"flags": {"f": ""}}, "needs a yes/no condition"),
+        ({"flags": {"categories": "X"}}, "reserved name"),
+        ({"composites": {"c": {}}}, "must map score names"),
+        (
+            {"scores": {"s": {"levels": ["a", "b"]}}, "composites": {"c": {"s": "high"}}},
+            "weight must be a number",
+        ),
+        ({"thresholds": [0.5]}, "`thresholds` must be a mapping"),
+        ({"thresholds": {"accept": True}}, "number from 0 to 1"),
+        ({"thresholds": {"maybe": 0.5}}, "`thresholds.maybe` is unknown"),
+        ({"track": []}, "`track` must be a mapping"),
+        ({"track": {"stages": {}}}, "`track.stages` is unknown"),
+        ({"track": {"match_on": "company"}}, "list of field names"),
+        ({"track": {"statuses": {"a": ["x"]}}}, "needs `categories`"),
+        ({"track": {"statuses": []}}, "must map status"),
+        (
+            {"categories": {"a": "A", "b": "B"}, "track": {"statuses": {"s": [1]}}},
+            "list of categories",
+        ),
+        (
+            {
+                "categories": {"a": "A", "b": "B"},
+                "track": {"statuses": {"s": "a"}, "terminal": {"s": "b"}},
+            },
+            "in both",
+        ),
+        ({"track": {"stale_after_days": 0}}, "positive number"),
+        ({"when": []}, "`when` must map"),
+        ({"when": {"categories": {"category": "x"}}}, "topic has none"),
+        (
+            {"categories": {"a": "A", "b": "B"}, "when": {"categories": {"category": []}}},
+            "must be a category",
+        ),
+        (
+            {"categories": {"a": "A", "b": "B"}, "when": {"categories": {"category": "z"}}},
+            "unknown category",
+        ),
+    ],
+)
+def test_more_validation_errors(data, message):
+    with pytest.raises(jf.TopicError, match=message):
+        jf.Topic.from_dict({"name": "T", "description": "d", **data})
+
+
+def test_valid_track_and_when_variants():
+    t = jf.Topic(
+        name="T",
+        description="d",
+        categories={
+            "hw": {"description": "x", "children": {"laptop": "L", "phone": "P"}},
+            "sw": "S",
+        },
+        track={"statuses": {"open": "hw/laptop"}, "terminal": {"done": ["sw"]}},
+        when={"categories": {"matched": False}},
+    )
+    assert t.track.statuses == {"open": ("hw/laptop",)}
+    assert t.when_for("categories").mode == "always"
+    assert t.category("hw/missing") is None and t.category("nope") is None
+    assert repr(t) == "Topic(name='T')" and hash(t) == hash(jf.Topic.from_dict(t.to_dict()))
+
+
+def test_loading_errors(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        jf.Topic.load(tmp_path / "missing.yaml")
+    with pytest.raises(TypeError):
+        jf.Topic.load(42)
+    with pytest.raises(jf.TopicError, match="must be a mapping"):
+        jf.Topic.from_dict(["not", "a", "dict"])
+    (tmp_path / "bad.yaml").write_text("name: Bad\n")
+    with pytest.raises(jf.TopicError, match=r"^bad.yaml: Topic 'Bad'"):
+        jf.Topic.load(tmp_path)
+
+
+def test_load_accepts_topics_and_mixed_lists(topics):
+    extra = jf.Topic(name="Extra", description="e")
+    assert list(jf.Topic.load([topics, extra, {"name": "D", "description": "d"}])) == [
+        "Jobs",
+        "Receipts",
+        "Extra",
+        "D",
+    ]
+    assert repr(jf.Topic.load(extra)) == "Topics(['Extra'])"
