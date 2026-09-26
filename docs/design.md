@@ -342,11 +342,14 @@ Built (0.1.0.dev0):
 - `ThresholdPolicy`; failure policy (`raise` / `review` / fallback judge).
 - `Result` / `TopicResult` `to_dict` / `from_dict`.
 - `JevJudge`, `FakeJudge`; helpers `choose` / `check` / `rate`.
+- `jf.configure()` for the default judge / API key.
+- CI (GitHub Actions): ruff, tests on Python 3.10–3.13, `uv build`.
+- Opt-in live tests (`JEVFILTER_LIVE=1`); passed on `jev-1.13.0`.
 
 Not yet: packing / splitting, `Budget`, `match_item`, `track.*`,
 `AsyncFilter`, judging nested categories (parsed, but rejected at judge
-time), extractors, `KeywordJudge`, record / replay, CLI, eval. Not yet run
-against live Jev.
+time), extractors, `KeywordJudge`, record / replay, CLI, eval, the
+PyPI publish workflow.
 
 ## Testing approach
 
