@@ -81,6 +81,10 @@ piece of content go to Jev in a single request. Field values are picked
 from the candidates you pass in, never generated. `f.explain(email)` shows
 the exact request and its estimated cost without sending it.
 
+If most of your content matches no topic, `jf.Filter(topics, speculative=False)`
+asks membership first and the rest only for topics that might match: a
+second round trip, but about 30% fewer tokens in our tests.
+
 ## Tracked items and batches
 
 ```python

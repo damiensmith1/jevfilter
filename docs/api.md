@@ -1,12 +1,12 @@
 ---
 title: API
 tags: [jevfilter, api]
-status: draft — mostly implemented (see design → Status)
+status: current (0.4.0) — sections marked *planned* are not built yet
 ---
 
 # API by example
 
-Proposed public API, from simplest to most advanced. See [design](design.md) for
+The public API, from simplest to most advanced. See [design](design.md) for
 the internals and [topic-format](topic-format.md) for definitions.
 
 ## Install
@@ -91,8 +91,9 @@ r = f.judge(Content(email, candidates={"Jobs": {"company": ["Acme", "Initech"]}}
 r["Jobs"].fields["company"]        # Field(value='Acme', confidence=0.99)
 ```
 
-Omit `candidates` to use the extractor registered for each field's
-`kind`.
+A field with no candidates isn't asked: it counts as "none of these"
+and the result carries a warning. *Planned:* built-in extractors that
+find candidates by field `kind`.
 
 ### Items and tracking
 
@@ -218,7 +219,7 @@ description: Customer support requests.
 pii: {}
 ```
 
-### Custom extractor
+### Custom extractor (*planned*)
 
 ```python
 @jf.extractor("order_number")

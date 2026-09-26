@@ -127,9 +127,10 @@ review). Same wording, same outcomes; fewer tokens when most content
 matches nothing, at the cost of a second round trip. A failed second
 stage fails the whole piece (per `on_error`).
 
-### Hierarchical categories
+### Hierarchical categories (planned)
 
-A category may have children. Resolution follows the TypeSafe
+Not built yet: nested categories load and validate, but judging refuses
+them. A category may have children. Resolution follows the TypeSafe
 hierarchical-classification cookbook:
 
 - **greedy** (default): one Choice per level, top child each step
@@ -212,7 +213,7 @@ All are small `typing.Protocol`s; built-ins are ordinary implementations.
 |----------|-----------|-----------|
 | `Judge` | `ask(state, questions) -> Answers` (+ async) | `JevJudge` / `AsyncJevJudge`, `FakeJudge` (scripted), `RecordingJudge` / `ReplayJudge`, `FallbackJudge(primary, secondary)` |
 | `Facet` | `questions(topic, content)`, `interpret(answers)` | membership, categories, fields, scores, flags |
-| `Extractor` | `extract(content, field) -> list[str]` | `org`, `title`, `email`, `known_values` (registry by field `kind`) |
+| `Extractor` (planned) | `extract(content, field) -> list[str]` | generic kinds only: `email`, `url`, `known_values`, `regex` (registry by field `kind`) |
 | `Policy` | `decide(topic, answers)` | `ThresholdPolicy` |
 | `Budget` | `check()`, `record(tokens)` | `Budget(usd, per_minute)` |
 
@@ -223,7 +224,8 @@ Custom facets register by name so they can be used from YAML:
 class Sentiment(ScoreFacet): ...
 ```
 
-Extractors register the same way (`@jevfilter.extractor("order_number")`).
+Extractors (planned) will register the same way
+(`@jevfilter.extractor("order_number")`).
 
 ## Budget
 
@@ -300,20 +302,23 @@ src/jevfilter/
   __init__.py      public API re-exports
   helpers.py       choose / check / rate
   topic.py         Topic model, loading, validation, versioning
-  facets/          membership, categories, fields, scores, flags, registry
+  facets/          membership, categories, fields, scores, flags, custom bases
+  registry.py      custom facet registry
+  content.py       Content (state, candidates, context)
   wording.py       question templates
-  plan.py          packing, splitting, token estimates
+  plan.py          packing, splitting, token estimates, truncation
   engine.py        pipeline, Filter / AsyncFilter
   policy.py        ThresholdPolicy, Decision, reasons
-  result.py        Result, TopicResult, provenance
-  judges/          jev (sync + async), fake, recording / replay
-  extract/         extractors + registry
-  items.py         match_item
+  result.py        Result, TopicResult, ItemMatch, provenance
+  judges/          jev (sync + async), fake, recording / replay, fallback
+  items.py         item views, pre-filter, normalisation
   track.py         tracking rules
-  budget.py  errors.py
+  budget.py        spend / rate caps
+  defaults.py      configure() and default judges
+  errors.py  version.py
   eval.py          evaluation + threshold sweep
   cli.py           jevfilter command
-tests/  examples/  docs/
+tests/  tests/live/  docs/
 ```
 
 ## Packaging and release
@@ -337,7 +342,7 @@ the app:
 | User topics as files, edited in a UI | `Topic.load`, `from_dict` validation, `to_yaml` round-trip |
 | Email in several topics, or none | one Noul per topic in `judge` |
 | Category per topic (job stage) | `categories` facet |
-| Company / role from the email | `fields` + `org` / `title` extractors |
+| Company / role from the email | `fields`, with candidates extracted by the app |
 | Unsure → review queue | `review` outcome + reasons |
 | Match email to existing job | `match_item` (code pre-filter, then Jev) |
 | Status pipeline, 21-day stale | `track.next_status`, `track.is_stale` |

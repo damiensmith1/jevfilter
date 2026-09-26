@@ -100,7 +100,9 @@ categories:
   bug: Something is broken or producing errors.
 ```
 
-Nested (hierarchical; resolved greedily or by beam search):
+Nested (hierarchical). Nested topics load and validate today; judging
+them (greedily or by beam search) is planned, and until then a filter
+refuses nested categories:
 
 ```yaml
 categories:
@@ -133,8 +135,9 @@ exclusions is sent to Jev exactly as before.
 
 ## Fields
 
-- `kind` picks the candidate extractor (`org`, `title`, `email`,
-  `person`, custom). Callers can always pass candidates directly instead.
+- `kind` names what the field is (`org`, `title`, `email`, …). Today
+  callers pass candidates (`Content(candidates=...)`); planned built-in
+  extractors will use `kind` to find them automatically.
 - `about` describes the field; it goes into the Choice question.
 - `required: true` → "none of these" sends the topic to `review`.
 

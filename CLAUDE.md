@@ -17,10 +17,10 @@ PyPI as `jevfilter`. First consumer: `jev-gmail-filter`, a Gmail app.
 - Pattern origin: <https://github.com/damiensmith1/semantic-pubsub-jev> (Go).
 - Project docs: everything under `docs/` — background, requirements,
   design, `topic-format.md` (language-neutral definition schema),
-  `api.md` (usage by example; see design.md "Status" for what's built).
+  `api.md` (usage by example; see design.md "Status" for what's built),
   `releasing.md` (how to publish to PyPI).
 - Goals: **easy** (three-line start), **extensible** (every part a small
-  protocol), **powerful** (fan-out, hierarchies, scores, items, eval).
+  protocol), **powerful** (fan-out, scores, items, eval; hierarchies planned).
 
 ## Conventions
 
@@ -29,7 +29,8 @@ PyPI as `jevfilter`. First consumer: `jev-gmail-filter`, a Gmail app.
   Check the floor with `uv run --python 3.10 --isolated --with pytest --with pyyaml pytest`.
 - Keep it stateless and source-agnostic. Nothing Gmail-specific here.
 - `TYPESAFE_API_KEY` lives in `.env` (gitignored). Never log or commit it.
-- Tests stub Jev. Live tests are opt-in and never run in CI.
+- Tests use `FakeJudge`. Live tests are opt-in and never run in CI:
+  `JEVFILTER_LIVE=1 uv run pytest tests/live -s` (loads `.env`, prints spend).
 - Commits are atomic and explain *why*. No co-author trailers.
 - `main` is protected by a ruleset (PR + code-owner review + green CI);
   only the repo admin bypasses it. See CONTRIBUTING.md.
