@@ -2,6 +2,7 @@
 
 from .base import (
     Answer,
+    AsyncJudge,
     ChoiceAnswer,
     Judge,
     NoulAnswer,
@@ -10,10 +11,12 @@ from .base import (
     ScoreAnswer,
 )
 from .fake import FakeJudge
-from .jev import JevJudge
+from .jev import AsyncJevJudge, JevJudge
 
 __all__ = [
     "Answer",
+    "AsyncJevJudge",
+    "AsyncJudge",
     "ChoiceAnswer",
     "FakeJudge",
     "JevJudge",

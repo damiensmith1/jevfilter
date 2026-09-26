@@ -195,3 +195,48 @@ class Result:
 
 def _fields(obj: Any) -> dict[str, Any]:
     return {k: (dict(v) if isinstance(v, dict) else v) for k, v in vars(obj).items()}
+
+
+@dataclass
+class ItemMatch:
+    """Which tracked item content is about. `item_id` None means a new item.
+
+    `asked` is False when code alone decided (no item survived the
+    `match_on` pre-filter), so no Jev call was made.
+    """
+
+    item_id: Any | None
+    outcome: Literal["match", "review"]
+    confidence: float | None = None
+    probabilities: dict[str, float] = field(default_factory=dict)
+    reasons: tuple[str, ...] = ()
+    asked: bool = False
+    candidates: tuple[Any, ...] = ()
+    topic: str = ""
+    topic_version: str = ""
+    model: str | None = None
+    request_ids: tuple[str, ...] = ()
+    input_tokens: int | None = None
+    cost_usd: float | None = None
+    wording_version: int = 0
+    jevfilter_version: str = ""
+    degraded: bool = False
+    warnings: tuple[str, ...] = ()
+
+    @property
+    def is_new(self) -> bool:
+        return self.item_id is None
+
+    def to_dict(self) -> dict[str, Any]:
+        d = {k: v for k, v in vars(self).items()}
+        for key in ("reasons", "candidates", "request_ids", "warnings"):
+            d[key] = list(d[key])
+        d["probabilities"] = dict(self.probabilities)
+        return d
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> ItemMatch:
+        d = dict(d)
+        for key in ("reasons", "candidates", "request_ids", "warnings"):
+            d[key] = tuple(d.get(key, ()))
+        return cls(**d)

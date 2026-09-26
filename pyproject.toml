@@ -1,7 +1,7 @@
 [project]
 name = "jevfilter"
-version = "0.1.0"
-description = "Judge content against plain-English topic definitions with TypeSafe's Jev."
+version = "0.2.0"
+description = "Filter anything with plain-English rules, powered by TypeSafe's Jev."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

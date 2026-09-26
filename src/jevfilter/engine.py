@@ -1,29 +1,41 @@
-"""The judge pipeline: compile → plan → execute → interpret → decide → report.
+"""The judge pipeline: compile → plan → guard → execute → interpret → decide → report.
 
-This version sends every question for one piece of content in a single
-request. Packing / splitting across Jev's context limits comes later.
+`Filter` runs it synchronously; `AsyncFilter` runs the same stages with an
+async backend and adds `judge_many`. Only execution differs between them.
 """
 
 from __future__ import annotations
 
-import json
-from collections.abc import Mapping
+import asyncio
+import inspect
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from . import registry, wording
+from .budget import DEFAULT_PRICE_PER_MTOK, Budget
 from .content import Content, as_content
-from .defaults import default_judge
+from .defaults import default_async_judge, default_judge
 from .errors import JevFilterError, JudgeError
 from .facets import BUILTIN, Facet
-from .judges.base import Answer, Judge, NoulAnswer, Question, Response, answer_to_dict
+from .items import as_items, content_values, prefilter
+from .judges.base import (
+    Answer,
+    AsyncJudge,
+    ChoiceAnswer,
+    Judge,
+    NoulAnswer,
+    Question,
+    Response,
+    answer_to_dict,
+)
+from .plan import Limits, Request, Truncate, estimate_tokens, plan_requests
 from .policy import Policy, ThresholdPolicy, TopicAnswers
-from .result import Result, Score, TopicResult
+from .result import ItemMatch, Result, Score, TopicResult
 from .topic import Topic, Topics, TopicSource, as_topics
 from .version import __version__
 
-DEFAULT_PRICE_PER_MTOK = 0.042
-"""Jev's published input price (USD per million tokens) when this was written."""
+__all__ = ["AsyncFilter", "Filter", "Plan", "estimate_tokens"]
 
 OnError = Literal["raise", "review"] | Judge
 
@@ -43,6 +55,45 @@ class _Compiled:
     warnings: list[str] = field(default_factory=list)
 
 
+@dataclass
+class _Batch:
+    """Every response for one piece of content, merged."""
+
+    responses: list[Response] = field(default_factory=list)
+    degraded: bool = False
+    error: str | None = None
+
+    @property
+    def failed(self) -> bool:
+        return self.error is not None and not self.responses
+
+    @property
+    def answers(self) -> dict[str, Answer]:
+        return {qid: a for r in self.responses for qid, a in r.answers.items()}
+
+    @property
+    def input_tokens(self) -> int | None:
+        counts = [r.input_tokens for r in self.responses if r.input_tokens is not None]
+        return sum(counts) if counts else None
+
+    @property
+    def models(self) -> list[str]:
+        return list(dict.fromkeys(r.model for r in self.responses if r.model))
+
+    @property
+    def request_ids(self) -> tuple[str, ...]:
+        return tuple(r.request_id for r in self.responses if r.request_id)
+
+
+@dataclass
+class _MatchPlan:
+    topic: Topic
+    labels: dict[str, Any]  # option label → item id
+    qid: str
+    requests: list[Request]
+    warnings: list[str]
+
+
 @dataclass(frozen=True)
 class Plan:
     """What `judge()` would send, without sending it."""
@@ -57,7 +108,7 @@ class Filter:
     """Topics plus engine configuration. `judge(content)` → `Result`.
 
     ```python
-    f = Filter(Topic.load("topics/"))
+    f = Filter(Topic.load("topics/"), budget=Budget(usd=1.00, per_minute=60))
     r = f.judge({"from": "...", "subject": "...", "body": "..."})
     ```
     """
@@ -66,10 +117,13 @@ class Filter:
         self,
         topics: TopicSource | Topics,
         *,
-        judge: Judge | None = None,
+        judge: Judge | AsyncJudge | None = None,
         policy: Policy | None = None,
         on_error: OnError = "raise",
-        price_per_mtok: float = DEFAULT_PRICE_PER_MTOK,
+        budget: Budget | None = None,
+        limits: Limits | None = None,
+        truncate: Truncate = "head",
+        price_per_mtok: float | None = None,
         include_requests: bool = False,
     ):
         self.topics = as_topics(topics)
@@ -80,11 +134,16 @@ class Filter:
         self._backend = judge
         self.policy: Policy = policy or ThresholdPolicy()
         self.on_error = on_error
+        self.budget = budget
+        self.limits = limits or Limits()
+        self.truncate = truncate
+        if price_per_mtok is None:
+            price_per_mtok = budget.price_per_mtok if budget else DEFAULT_PRICE_PER_MTOK
         self.price_per_mtok = price_per_mtok
         self.include_requests = include_requests
 
     @property
-    def backend(self) -> Judge:
+    def backend(self) -> Any:
         """The judge backend: the one given, else the `configure()`d default."""
         return self._backend or default_judge()
 
@@ -92,24 +151,45 @@ class Filter:
 
     def judge(self, content: Any) -> Result:
         """Judge one piece of content (text, a dict, or `Content`) against every topic."""
-        c = as_content(content)
-        compiled = self._compile(c)
-        response, degraded, error = self._execute(compiled)
-        return self._report(compiled, response, degraded, error)
+        compiled = self._compile(as_content(content))
+        requests, warnings = self._plan(compiled)
+        return self._report(compiled, requests, warnings, self._run(requests))
 
     def explain(self, content: Any) -> Plan:
         """The exact request payloads and an estimated cost, without calling the backend."""
         compiled = self._compile(as_content(content))
-        request = _payload(compiled)
-        tokens = estimate_tokens(request)
+        requests, warnings = self._plan(compiled)
+        payloads = [r.payload() for r in requests]
+        tokens = sum(estimate_tokens(p) for p in payloads)
         return Plan(
-            requests=[request],
+            requests=payloads,
             estimated_input_tokens=tokens,
             cost_usd=tokens * self.price_per_mtok / 1e6,
-            warnings=tuple(compiled.warnings),
+            warnings=tuple(compiled.warnings + warnings),
         )
 
-    # -- 1. compile ---------------------------------------------------------
+    def match_item(
+        self,
+        content: Any,
+        topic: Topic | str,
+        items: Iterable[Any],
+        *,
+        result: TopicResult | None = None,
+        fields: Mapping[str, Any] | None = None,
+    ) -> ItemMatch:
+        """Which of `items` is `content` about, or a new one?
+
+        Items whose `track.match_on` fields differ from the content's (taken
+        from `result` and/or `fields=`) are dropped in code first. If none
+        remain the answer is "new" with no Jev call; otherwise Jev picks one
+        of the survivors or "new".
+        """
+        prepared = self._prepare_match(as_content(content), topic, items, result, fields)
+        if isinstance(prepared, ItemMatch):
+            return prepared
+        return self._finish_match(prepared, self._run(prepared.requests))
+
+    # -- 1. compile / 2. plan -----------------------------------------------
 
     def _compile(self, content: Content) -> _Compiled:
         compiled = _Compiled(content.as_state(), {}, {})
@@ -127,55 +207,75 @@ class Filter:
                     compiled.warnings.extend(warn(t, content))
         return compiled
 
-    # -- 3/4. execute -------------------------------------------------------
+    def _plan(self, compiled: _Compiled) -> tuple[list[Request], list[str]]:
+        return plan_requests(compiled.state, compiled.questions, self.limits, self.truncate)
 
-    def _execute(self, compiled: _Compiled) -> tuple[Response | None, bool, str | None]:
+    # -- 3/4. guard + execute -----------------------------------------------
+
+    def _run(self, requests: list[Request]) -> _Batch:
         try:
-            return self.backend.ask(compiled.state, compiled.questions), False, None
+            return _Batch([self._ask(self.backend, r, guard=True) for r in requests])
         except JudgeError as e:
             if self.on_error == "raise":
                 raise
             if self.on_error == "review":
-                return None, True, str(e)
+                return _Batch(degraded=True, error=str(e))
             fallback = self.on_error
-            return fallback.ask(compiled.state, compiled.questions), True, str(e)
+            return _Batch(
+                [self._ask(fallback, r, guard=False) for r in requests],
+                degraded=True,
+                error=str(e),
+            )
+
+    def _ask(self, judge: Any, request: Request, *, guard: bool) -> Response:
+        if guard and self.budget is not None:
+            self.budget.check()
+        response = judge.ask(request.state, request.questions)
+        if self.budget is not None:
+            self.budget.record(response.input_tokens)
+        return response
 
     # -- 5/6/7. interpret, decide, report -----------------------------------
+
+    def _cost(self, tokens: int | None) -> float | None:
+        return tokens * self.price_per_mtok / 1e6 if tokens is not None else None
 
     def _report(
         self,
         compiled: _Compiled,
-        response: Response | None,
-        degraded: bool,
-        error: str | None,
+        requests: list[Request],
+        plan_warnings: list[str],
+        batch: _Batch,
     ) -> Result:
-        warnings = list(compiled.warnings)
-        if error:
-            warnings.append(f"backend_error: {error}")
+        warnings = compiled.warnings + plan_warnings
+        if batch.error:
+            warnings.append(f"backend_error: {batch.error}")
+        if len(batch.models) > 1:
+            warnings.append(f"requests were answered by different models: {batch.models}")
         topics: dict[str, TopicResult] = {}
-        if response is None:
+        if batch.failed:
             for t in self.topics.values():
                 topics[t.name] = TopicResult(
                     t.name, "review", 0.0, ("backend_error",), topic_version=t.version
                 )
         else:
-            grouped = _group(compiled.routes, response.answers)
+            grouped = _group(compiled.routes, batch.answers)
             for t in self.topics.values():
                 topics[t.name] = self._topic_result(t, grouped.get(t.name, {}))
 
-        tokens = response.input_tokens if response else None
+        answers = batch.answers
         return Result(
             topics=topics,
-            model=response.model if response else None,
-            request_ids=tuple(r for r in [response.request_id if response else None] if r),
-            input_tokens=tokens,
-            cost_usd=tokens * self.price_per_mtok / 1e6 if tokens is not None else None,
+            model=batch.models[0] if batch.models else None,
+            request_ids=batch.request_ids,
+            input_tokens=batch.input_tokens,
+            cost_usd=self._cost(batch.input_tokens),
             wording_version=wording.WORDING_VERSION,
             jevfilter_version=__version__,
-            degraded=degraded,
+            degraded=batch.degraded,
             warnings=tuple(warnings),
-            raw={qid: answer_to_dict(a) for qid, a in response.answers.items()} if response else {},
-            requests=[_payload(compiled)] if self.include_requests else None,
+            raw={qid: answer_to_dict(a) for qid, a in answers.items()},
+            requests=[r.payload() for r in requests] if self.include_requests else None,
         )
 
     def _topic_result(self, t: Topic, answers: dict[str, dict[str, Answer]]) -> TopicResult:
@@ -221,6 +321,172 @@ class Filter:
             facets={k: v for k, v in values.items() if k not in BUILTIN},
             topic_version=t.version,
         )
+
+    # -- item matching ------------------------------------------------------
+
+    def _topic(self, topic: Topic | str) -> Topic:
+        if isinstance(topic, Topic):
+            return topic
+        try:
+            return self.topics[topic]
+        except KeyError:
+            raise ValueError(f"unknown topic {topic!r}") from None
+
+    def _match_base(self, t: Topic, **kw: Any) -> dict[str, Any]:
+        return {
+            "topic": t.name,
+            "topic_version": t.version,
+            "wording_version": wording.WORDING_VERSION,
+            "jevfilter_version": __version__,
+            **kw,
+        }
+
+    def _prepare_match(
+        self,
+        content: Content,
+        topic: Topic | str,
+        items: Iterable[Any],
+        result: TopicResult | None,
+        fields: Mapping[str, Any] | None,
+    ) -> ItemMatch | _MatchPlan:
+        t = self._topic(topic)
+        values = content_values(t, result, fields)
+        survivors = prefilter(t, as_items(items), values)
+        if not survivors:
+            return ItemMatch(None, "match", **self._match_base(t))
+        labels = {s.label: s.id for s in survivors}
+        question = wording.item_match(t, {s.label: s.describe() for s in survivors}, values)
+        qid = f"{t.name}/item"
+        requests, warnings = plan_requests(
+            content.as_state(), {qid: question}, self.limits, self.truncate
+        )
+        return _MatchPlan(t, labels, qid, requests, warnings)
+
+    def _finish_match(self, plan: _MatchPlan, batch: _Batch) -> ItemMatch:
+        warnings = list(plan.warnings)
+        if batch.error:
+            warnings.append(f"backend_error: {batch.error}")
+        base = self._match_base(
+            plan.topic,
+            asked=True,
+            candidates=tuple(plan.labels.values()),
+            model=batch.models[0] if batch.models else None,
+            request_ids=batch.request_ids,
+            input_tokens=batch.input_tokens,
+            cost_usd=self._cost(batch.input_tokens),
+            degraded=batch.degraded,
+            warnings=tuple(warnings),
+        )
+        if batch.failed:
+            return ItemMatch(None, "review", reasons=("backend_error",), **base)
+        answer = batch.answers.get(plan.qid)
+        if not isinstance(answer, ChoiceAnswer):
+            raise JudgeError(f"no item-match answer for topic {plan.topic.name!r}")
+
+        def key(label: str) -> str:
+            return str(plan.labels[label]) if label in plan.labels else label
+
+        item_id = None if answer.choice == wording.NEW_ITEM else plan.labels.get(answer.choice)
+        min_conf = plan.topic.thresholds.get(
+            "min_confidence", getattr(self.policy, "min_confidence", 0.5)
+        )
+        low = answer.confidence < min_conf
+        return ItemMatch(
+            item_id,
+            "review" if low else "match",
+            confidence=answer.confidence,
+            probabilities={key(k): p for k, p in answer.probabilities.items()},
+            reasons=("low_confidence:item",) if low else (),
+            **base,
+        )
+
+
+class AsyncFilter(Filter):
+    """`Filter` with an async API and `judge_many` for batches.
+
+    Uses an async judge (`AsyncJevJudge` by default); a sync `Judge` such as
+    `FakeJudge` also works and runs in a worker thread. A piece of content
+    that needs several requests sends them concurrently.
+    """
+
+    @property
+    def backend(self) -> Any:
+        return self._backend or default_async_judge()
+
+    async def judge(self, content: Any) -> Result:  # type: ignore[override]
+        compiled = self._compile(as_content(content))
+        requests, warnings = self._plan(compiled)
+        return self._report(compiled, requests, warnings, await self._run_async(requests))
+
+    async def judge_many(
+        self,
+        contents: Iterable[Any],
+        *,
+        concurrency: int = 8,
+        return_exceptions: bool = False,
+    ) -> list[Any]:
+        """Judge many pieces of content, at most `concurrency` at once.
+
+        Results come back in input order. With `return_exceptions=True`,
+        failures (e.g. `BudgetExceeded`) are returned in place instead of
+        raised, so one refusal doesn't lose the rest of a batch.
+        """
+        if concurrency < 1:
+            raise ValueError("concurrency must be ≥ 1")
+        gate = asyncio.Semaphore(concurrency)
+
+        async def one(content: Any) -> Result:
+            async with gate:
+                return await self.judge(content)
+
+        return await asyncio.gather(
+            *(one(c) for c in contents), return_exceptions=return_exceptions
+        )
+
+    async def match_item(  # type: ignore[override]
+        self,
+        content: Any,
+        topic: Topic | str,
+        items: Iterable[Any],
+        *,
+        result: TopicResult | None = None,
+        fields: Mapping[str, Any] | None = None,
+    ) -> ItemMatch:
+        prepared = self._prepare_match(as_content(content), topic, items, result, fields)
+        if isinstance(prepared, ItemMatch):
+            return prepared
+        return self._finish_match(prepared, await self._run_async(prepared.requests))
+
+    async def _run_async(self, requests: list[Request]) -> _Batch:
+        async def all_with(judge: Any, guard: bool) -> list[Response]:
+            outcomes = await asyncio.gather(
+                *(self._ask_async(judge, r, guard=guard) for r in requests),
+                return_exceptions=True,
+            )
+            for o in outcomes:
+                if isinstance(o, BaseException):
+                    raise o
+            return list(outcomes)  # type: ignore[arg-type]
+
+        try:
+            return _Batch(await all_with(self.backend, True))
+        except JudgeError as e:
+            if self.on_error == "raise":
+                raise
+            if self.on_error == "review":
+                return _Batch(degraded=True, error=str(e))
+            return _Batch(await all_with(self.on_error, False), degraded=True, error=str(e))
+
+    async def _ask_async(self, judge: Any, request: Request, *, guard: bool) -> Response:
+        if guard and self.budget is not None:
+            self.budget.check()
+        if inspect.iscoroutinefunction(judge.ask):
+            response = await judge.ask(request.state, request.questions)
+        else:
+            response = await asyncio.to_thread(judge.ask, request.state, request.questions)
+        if self.budget is not None:
+            self.budget.record(response.input_tokens)
+        return response
 
 
 # -- helpers ----------------------------------------------------------------
@@ -271,15 +537,3 @@ def _composites(t: Topic, scores: Mapping[str, Score]) -> dict[str, float]:
         if all(s in scores for s in weights):
             out[name] = sum(w * scores[s].normalized for s, w in weights.items())
     return out
-
-
-def _payload(compiled: _Compiled) -> dict[str, Any]:
-    return {
-        "state": compiled.state,
-        "questions": {qid: q.to_dict() for qid, q in compiled.questions.items()},
-    }
-
-
-def estimate_tokens(payload: Any) -> int:
-    """Rough input-token estimate: characters ÷ 4."""
-    return len(json.dumps(payload, ensure_ascii=False)) // 4 + 1

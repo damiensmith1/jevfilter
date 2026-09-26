@@ -127,3 +127,29 @@ def check(condition: Any) -> Question:
 
 def rate(dimension: str, levels: Sequence[Any]) -> Question:
     return Question("score", f"Rate `content` on {dimension}.", list(levels))
+
+
+# -- item matching ----------------------------------------------------------
+
+NEW_ITEM = "new"
+
+
+def item_match(
+    topic: Topic,
+    options: Mapping[str, Any],
+    content_fields: Mapping[str, Any],
+) -> Question:
+    """Choice over tracked items (label → description) plus "new"."""
+    instructions: dict[str, Any] = {
+        "task": (
+            "`content` belongs to the topic defined here. Which of the tracked "
+            'items listed as options is it about? Choose "new" if it is about '
+            "a different one."
+        ),
+        "topic": topic_block(topic),
+    }
+    if content_fields:
+        instructions["values_in_content"] = dict(content_fields)
+    criteria = dict(options)
+    criteria[NEW_ITEM] = f"A different {topic.name} item that is not among the other options."
+    return Question("choice", instructions, criteria)

@@ -81,6 +81,20 @@ piece of content go to Jev in a single request. Field values are picked
 from the candidates you pass in, never generated. `f.explain(email)` shows
 the exact request and its estimated cost without sending it.
 
+## Tracked items and batches
+
+```python
+# Which of your tracked items is this email about? (you store the items)
+m = f.match_item(email, "Jobs", my_jobs, result=r["Jobs"])
+m.item_id                     # an id from my_jobs, or None for a new one
+
+jf.track.next_status(topics["Jobs"], "applied", "interview")   # "interviewing"
+
+# Many emails at once, with a spend cap that refuses instead of overspending
+af = jf.AsyncFilter(topics, budget=jf.Budget(usd=0.50, per_minute=120))
+results = await af.judge_many(emails, concurrency=8)
+```
+
 See [docs/topic-format.md](docs/topic-format.md) for every topic option
 (scores, composites, `when`, thresholds, `meta`) and [docs/api.md](docs/api.md)
 for the rest of the API.

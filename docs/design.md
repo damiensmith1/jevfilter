@@ -103,12 +103,17 @@ be tuned and evaluated centrally; a facet may override its template.
 ### Packing and splitting
 
 Jev limits: 64k tokens per request (state + all questions); 32k for state
-+ the longest question. The planner estimates tokens (proposed:
-characters ÷ 4, calibrated against reported `input_tokens`) and
-first-fit packs questions into as few requests as possible, resending the
-state per request. State over the 32k budget is truncated per a
-configurable strategy (`head`, `head_tail`, or a callable) with a
-warning in the result.
++ the longest question. The planner estimates tokens as characters ÷ 4
+with a 0.9 safety margin (`Limits`), and first-fit packs questions, in
+order, into as few requests as possible, resending the state per request.
+State over its budget is truncated per `truncate=`: `head` (default)
+repeatedly shortens the longest string in the state, `head_tail` keeps
+both ends, a callable does its own, and `error` refuses. The result
+carries a warning. A single question over the limit is an error.
+
+If any request for a piece of content fails, the failure policy applies
+to the whole piece (a fallback judge re-asks every request). `AsyncFilter`
+sends a piece's requests concurrently.
 
 ### Hierarchical categories
 
@@ -151,25 +156,41 @@ labelled data.
 
 `match_item(content, topic, items)`:
 
-1. **Pre-filter in code** — keep items whose `match_on` fields equal the
-   content's selected field values (normalised). Zero or one survivor →
-   answer without calling Jev.
-2. **Choose** — one Choice over surviving items (described by fields,
-   status and caller-supplied summary) plus "new".
-3. **Decide** — low confidence → `review`.
+`match_item(content, topic, items, *, result=None, fields=None)`. The
+content's own field values come from a `judge` result and/or `fields=`.
 
-Consumers can pass a thread / conversation key to skip matching entirely
-when content is already linked.
+1. **Pre-filter in code** — keep items whose `match_on` fields equal the
+   content's values, compared case-, accent-, punctuation- and
+   company-suffix-insensitively (`Acme, Inc.` = `acme`). A `match_on`
+   field the content has no value for doesn't filter. No survivors → "new"
+   without calling Jev (`asked=False`).
+2. **Choose** — one Choice over the survivors (described by fields,
+   status and caller-supplied summary) plus "new", with the content's
+   values in the instructions. Asked even for a single survivor: the same
+   company can still be a different role.
+3. **Decide** — confidence below `min_confidence` → `review`
+   (`low_confidence:item`). Budget and failure policy apply as for `judge`.
+
+Returns an `ItemMatch` (serialisable). Skipping matching when content is
+already linked (e.g. the same email thread) is the consumer's shortcut.
 
 ## Tracking rules
 
 Pure functions over a topic's `track` config (no storage, no Jev):
 
-- `track.initial_status(topic, category)`
-- `track.next_status(topic, current, category)` — forward-only through
-  `statuses`; `terminal` always applies; terminal reopens only on a later
-  stage
-- `track.is_stale(topic, last_activity, now)`
+- `track.status_for(topic, category)` — the status a category moves to, or None
+- `track.initial_status(topic, category)` — where the category maps, else
+  the first status
+- `track.next_status(topic, current, category, *, last_stage=None)` —
+  forward-only through `statuses`; `terminal` always applies; categories
+  not listed link without moving. A terminal item stays terminal unless
+  the caller passes its last pipeline status as `last_stage` and the new
+  status is later than that (the library can't know an item's history).
+- `track.is_stale(topic, last_activity, now=None, *, status=None)` — no
+  activity for `stale_after_days`; terminal items never go stale.
+- `track.is_terminal(topic, status)`
+
+Nested category paths (`hw/ok`) match their leaf name in `track` lists.
 
 ## Extension points
 
@@ -197,9 +218,14 @@ Extractors register the same way (`@jevfilter.extractor("order_number")`).
 Carried over from [semantic-pubsub-jev](https://github.com/damiensmith1/semantic-pubsub-jev): a rate cap stops loops fast; a
 spend cap stops slow bleeds. Both **refuse** (`BudgetExceeded`) rather
 than block. Spend = reported `input_tokens` × price, checked before each
-call, so overshoot is bounded to one request. One `Budget` can be shared
-by many filters. Price is configurable (defaults to Jev's published
-$0.042/Mtok).
+request (including each split request and item match), so overshoot is
+bounded to one request. A passing check reserves its slot in the rate
+window, so concurrent callers can't all slip through. One `Budget` is
+thread-safe and can be shared by many filters. Price is configurable
+(defaults to Jev's published $0.042/Mtok) and also sets the filter's cost
+reporting. `BudgetExceeded` is never turned into `review` by `on_error`:
+refusing is the point. In `judge_many`, `return_exceptions=True` returns
+refusals in place so the rest of a batch survives.
 
 ## Failure policy
 
@@ -317,6 +343,12 @@ the app:
   and the result carries a warning.
 - `Content(candidates=...)` is keyed topic → field; topic `"*"` applies
   to every topic. `Content(context=...)` is sent as state beside `content`.
+- `track` stays in jevfilter (pure rules over the topic's `track` config),
+  even though it never calls Jev: it's small, already part of the topic
+  format, and useful to any app that tracks items.
+- `match_item` asks Jev even when one item survives the pre-filter.
+- `AsyncFilter` accepts sync judges (run in a thread); `AsyncJevJudge`
+  keeps one client per event loop.
 
 ## Open questions
 
@@ -333,7 +365,7 @@ the app:
 
 ## Status
 
-Built (0.1.0):
+Built (0.1.0, plus 0.2.0 below):
 
 - `Topic`: validation (all problems at once, typo hints), warnings,
   YAML / JSON / dict loading, round-trip, version.
@@ -351,9 +383,17 @@ Built (0.1.0):
   trusted publishing (environment `pypi`). TestPyPI skipped.
 - Opt-in live tests (`JEVFILTER_LIVE=1`); passed on `jev-1.13.0`.
 
-Not yet: packing / splitting, `Budget`, `match_item`, `track.*`,
-`AsyncFilter`, judging nested categories (parsed, but rejected at judge
-time), extractors, `KeywordJudge`, record / replay, CLI, eval.
+Added in 0.2.0:
+
+- `Budget` (spend + rate caps, shared, thread-safe), `BudgetExceeded`.
+- Request packing / splitting and truncation (`Limits`, `truncate=`).
+- `match_item` → `ItemMatch`; `track.*` rules.
+- `AsyncFilter` (`judge`, `judge_many`, `match_item`), `AsyncJevJudge`.
+- Live tests for item matching and an async batch under a budget, passed
+  on `jev-1.13.0`.
+
+Not yet: judging nested categories (parsed, but rejected at judge time),
+extractors, `KeywordJudge`, record / replay, CLI, eval.
 
 ## Testing approach
 

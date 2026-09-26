@@ -1,7 +1,7 @@
 ---
 title: API
 tags: [jevfilter, api]
-status: draft — partly implemented (see design → Status)
+status: draft — mostly implemented (see design → Status)
 ---
 
 # API by example
@@ -99,30 +99,60 @@ Omit `candidates` to use the extractor registered for each field's
 ```python
 from jevfilter import track
 
-jobs = topics["Jobs"]
-m = f.match_item(email, jobs, items=[
+r = f.judge(Content(email, candidates=...))
+m = f.match_item(email, "Jobs", items=[
     {"id": 3, "fields": {"company": "Acme", "role": "Backend Engineer"}, "status": "applied"},
     {"id": 7, "fields": {"company": "Acme", "role": "Data Engineer"}, "status": "contacted"},
-])
-m.item_id          # 3, or None for a new item
+], result=r["Jobs"])  # or fields={"company": "Acme"}
+m.item_id          # 7, or None for a new item (m.is_new)
 m.outcome          # "match" | "review"
+m.asked            # False when code alone decided (no item shared `match_on`)
 
+jobs = topics["Jobs"]
+track.initial_status(jobs, "applied")                          # "applied"
 track.next_status(jobs, current="applied", category="interview")   # "interviewing"
-track.is_stale(jobs, last_activity=dt, now=now)                   # bool
+track.next_status(jobs, "rejected", "offer", last_stage="interviewing")  # reopens: "offer"
+track.is_stale(jobs, last_activity=dt, now=now, status="applied")     # bool
 ```
+
+Items are your records (dicts or objects with `id`, `fields`, optional
+`status` and `summary`); jevfilter never stores them. Items whose
+`match_on` fields differ from the content's are dropped in code first
+(case, accents, punctuation and suffixes like "Inc." are ignored). If none
+remain the answer is "new" with no Jev call; otherwise Jev picks one or
+"new", even when only one remains, since the same company can mean a
+different role.
 
 ### Many items
 
 ```python
-results = await AsyncFilter(topics).judge_many(emails, concurrency=8)
+f = AsyncFilter(topics, budget=Budget(usd=0.50, per_minute=120))
+results = await f.judge_many(emails, concurrency=8, return_exceptions=True)
+# in input order; a BudgetExceeded comes back in place instead of raising
+m = await f.match_item(email, "Jobs", items, result=r["Jobs"])
 ```
+
+`AsyncFilter` uses `AsyncJevJudge` by default; a sync judge (e.g.
+`FakeJudge`) also works, run in a thread.
 
 ### Inspect before sending
 
 ```python
 plan = f.explain(email)
-plan.requests      # exact payloads
+plan.requests      # exact payloads (several if it had to split)
 plan.cost_usd      # estimate
+plan.warnings      # e.g. content truncated to fit
+```
+
+### Long content and many topics
+
+Questions are packed into as few requests as fit Jev's limits (64k tokens
+per request, 32k for content plus the longest question). Content that
+can't fit is truncated, with a warning on the result:
+
+```python
+Filter(topics, truncate="head")        # default; or "head_tail", "error", or a callable
+Filter(topics, limits=Limits(request_tokens=64_000, state_and_question_tokens=32_000))
 ```
 
 ## Level 3 — engine
@@ -131,7 +161,8 @@ plan.cost_usd      # estimate
 from jevfilter import Filter, Budget, ThresholdPolicy
 from jevfilter.judges import JevJudge, KeywordJudge
 
-budget = Budget(usd=1.00, per_minute=60)       # share across filters
+budget = Budget(usd=1.00, per_minute=60)       # share across filters; refuses with
+                                               # BudgetExceeded rather than blocking
 
 f = Filter(
     topics,

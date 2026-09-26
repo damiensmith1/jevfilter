@@ -70,6 +70,13 @@ class Judge(Protocol):
     def ask(self, state: Any, questions: Mapping[str, Question]) -> Response: ...
 
 
+class AsyncJudge(Protocol):
+    """An async backend: `async def ask(...)`. `AsyncFilter` also accepts a
+    sync `Judge` and runs it in a worker thread."""
+
+    async def ask(self, state: Any, questions: Mapping[str, Question]) -> Response: ...
+
+
 def answer_to_dict(a: Answer) -> dict[str, Any]:
     if isinstance(a, NoulAnswer):
         return {"type": "noul", "p": a.p}

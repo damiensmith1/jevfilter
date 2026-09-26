@@ -142,3 +142,58 @@ def test_helpers():
 def teardown_module():
     if SPEND:
         print(f"\nLive spend: ${sum(SPEND):.6f} over {len(SPEND)} filter requests")
+
+
+FOLLOW_UP = {
+    "from": "sam@initech.example",
+    "subject": "Re: Interview for Data Engineer",
+    "body": "Hi Damien, confirming your Data Engineer phone screen tomorrow at 2pm.",
+}
+TRACKED = [
+    {"id": 1, "fields": {"company": "Initech", "role": "Data Engineer"}, "status": "contacted"},
+    {"id": 2, "fields": {"company": "Initech", "role": "Office Manager"}, "status": "applied"},
+    {
+        "id": 3,
+        "fields": {"company": "Acme Robotics", "role": "Backend Engineer"},
+        "status": "applied",
+    },
+]
+
+
+def test_match_item_picks_the_right_role(live_filter):
+    m = live_filter.match_item(FOLLOW_UP, "Jobs", TRACKED, fields={"company": "Initech"})
+    SPEND.append(m.cost_usd or 0.0)
+    print(f"  item={m.item_id} conf={m.confidence:.2f} candidates={m.candidates} ${m.cost_usd:.6f}")
+    assert m.candidates == (1, 2)
+    assert m.item_id == 1 and m.outcome == "match"
+
+
+def test_match_item_new_role(live_filter):
+    email = {
+        **FOLLOW_UP,
+        "subject": "Security Engineer role at Initech",
+        "body": "Hi Damien, I'm a recruiter at Initech. "
+        "Would you be open to our Security Engineer role?",
+    }
+    m = live_filter.match_item(email, "Jobs", TRACKED, fields={"company": "Initech"})
+    SPEND.append(m.cost_usd or 0.0)
+    print(f"  item={m.item_id} conf={m.confidence:.2f} probs={m.probabilities}")
+    assert m.is_new
+
+
+def test_async_batch_with_budget():
+    import asyncio
+
+    _load_env()
+    if not os.environ.get("TYPESAFE_API_KEY"):
+        pytest.skip("no TYPESAFE_API_KEY")
+    budget = jf.Budget(usd=0.01, per_minute=30)
+    f = jf.AsyncFilter(jf.Topic.load(TOPICS), budget=budget)
+    emails = [APPLIED, INTERVIEW, DIGEST, RECEIPT]
+    results = asyncio.run(f.judge_many([jf.Content(e, candidates=CANDIDATES) for e in emails]))
+    SPEND.append(budget.spent_usd)
+    outcomes = [{t.topic: t.outcome for t in r} for r in results]
+    print(f"  outcomes={outcomes} spent=${budget.spent_usd:.6f}")
+    assert [r["Jobs"].outcome for r in results][:2] == ["match", "match"]
+    assert results[2]["Jobs"].outcome != "match" and results[3]["Receipts"].matched
+    assert budget.requests == 4

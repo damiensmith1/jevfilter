@@ -54,7 +54,8 @@ definition schema and [api](api.md) for usage.
 
 - **P1 — Pack.** All questions for one piece of content go in as few
   requests as possible (one, where it fits Jev's context limits).
-- **P2 — Split.** Automatically split when a request would exceed limits.
+- **P2 — Split.** Automatically split when a request would exceed limits;
+  truncate content that can't fit, with a warning.
 - **P3 — Batch.** Judge many items concurrently with a concurrency limit.
 - **P4 — Budget.** Spend cap (USD) and rate cap (calls/min), shareable
   across filters; over-limit calls are refused with a typed error.

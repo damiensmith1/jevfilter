@@ -17,3 +17,7 @@ class TopicError(JevFilterError, ValueError):
 
 class JudgeError(JevFilterError):
     """The judge backend failed to answer."""
+
+
+class BudgetExceeded(JevFilterError):
+    """A spend or rate ceiling refused the call. Nothing was sent."""
