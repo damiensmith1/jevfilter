@@ -1,6 +1,7 @@
 # jevfilter
 
 [![CI](https://github.com/damiensmith1/jevfilter/actions/workflows/ci.yml/badge.svg)](https://github.com/damiensmith1/jevfilter/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/jevfilter)](https://pypi.org/project/jevfilter/)
 
 Judge content against plain-English definitions with TypeSafe's
 [Jev](https://docs.typesafe.ai). Describe what you care about in a few
@@ -18,6 +19,8 @@ You get plain results back and store them however you like.
 pip install "jevfilter[yaml]"
 export TYPESAFE_API_KEY=...
 ```
+
+On PyPI: <https://pypi.org/project/jevfilter/>
 
 Python 3.10+. You can also set the key in code with
 `jf.configure(api_key=..., model="jev-1.13.0")`. jevfilter never reads
