@@ -304,6 +304,9 @@ the app:
 - Goals: easy, extensible, powerful (three layers above).
 - Python ≥ 3.10.
 - Helper names `choose` / `check` / `rate`.
+- API key: `TYPESAFE_API_KEY` from the environment (via the SDK), or
+  `jf.configure(api_key=, model=)` / `JevJudge(api_key=)`. The library
+  never reads `.env` files (stateless, no file access).
 - Question instructions are JSON objects: an optional `premise` (for
   speculative facets), the `task`, facet details, and the `topic` block
   (`name`, `description`, `does_not_include`). Membership adds

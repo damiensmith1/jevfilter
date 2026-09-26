@@ -11,6 +11,7 @@ r = f.judge("Your application to Acme was received")
 """
 
 from .content import Content
+from .defaults import configure
 from .engine import Filter, Plan
 from .errors import JevFilterError, JudgeError, TopicError
 from .helpers import check, choose, rate
@@ -42,6 +43,7 @@ __all__ = [
     "Topics",
     "__version__",
     "check",
+    "configure",
     "choose",
     "facet",
     "rate",

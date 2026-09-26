@@ -17,6 +17,21 @@ pip install "jevfilter[yaml,cli,eval]"
 export TYPESAFE_API_KEY=...
 ```
 
+## API key and model
+
+jevfilter uses `TYPESAFE_API_KEY` from the environment by default. It
+never reads `.env` files; load one yourself (e.g. `python-dotenv`) if you
+keep the key there. To set it in code:
+
+```python
+import jevfilter as jf
+from jevfilter.judges import JevJudge
+
+jf.configure(api_key=key, model="jev-1.13.0")   # default for helpers and filters
+f = Filter(topics, judge=JevJudge(api_key=key))  # or per filter
+jf.choose("...", ["a", "b"], judge=my_judge)     # or per call
+```
+
 ## Level 1 — helpers
 
 ```python

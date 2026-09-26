@@ -10,16 +10,28 @@ from .base import ChoiceAnswer, NoulAnswer, Question, Response, ScoreAnswer
 
 
 class JevJudge:
-    """Ask Jev. Pass `model=` to pin a version (e.g. `"jev-1.13.0"`).
+    """Ask Jev.
 
-    `client` may be any object with the `TypeSafeClient.system_one` signature;
-    otherwise one is created from the environment (`TYPESAFE_API_KEY`).
+    - `model` pins a version (e.g. `"jev-1.13.0"`); default is the SDK's.
+    - `api_key` defaults to the `TYPESAFE_API_KEY` environment variable.
+      jevfilter never reads `.env` files; load one yourself if you use it.
+    - `client` may be any object with the `TypeSafeClient.system_one`
+      signature; other keyword arguments go to `TypeSafeClient`.
     """
 
-    def __init__(self, model: str | None = None, client: Any = None, **client_kwargs: Any):
+    def __init__(
+        self,
+        model: str | None = None,
+        *,
+        api_key: str | None = None,
+        client: Any = None,
+        **client_kwargs: Any,
+    ):
+        if client is not None and (api_key is not None or client_kwargs):
+            raise ValueError("pass either client= or client options (api_key=, ...), not both")
         self.model = model
         self._client = client
-        self._client_kwargs = client_kwargs
+        self._client_kwargs = {**client_kwargs, **({"api_key": api_key} if api_key else {})}
 
     @property
     def client(self) -> Any:

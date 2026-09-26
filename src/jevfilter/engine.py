@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 from . import registry, wording
 from .content import Content, as_content
+from .defaults import default_judge
 from .errors import JevFilterError, JudgeError
 from .facets import BUILTIN, Facet
 from .judges.base import Answer, Judge, NoulAnswer, Question, Response, answer_to_dict
@@ -84,12 +85,8 @@ class Filter:
 
     @property
     def backend(self) -> Judge:
-        """The judge backend (Jev unless one was given)."""
-        if self._backend is None:
-            from .judges.jev import JevJudge
-
-            self._backend = JevJudge()
-        return self._backend
+        """The judge backend: the one given, else the `configure()`d default."""
+        return self._backend or default_judge()
 
     # -- public -------------------------------------------------------------
 

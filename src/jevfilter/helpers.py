@@ -14,26 +14,15 @@ from typing import Any
 
 from . import wording
 from .content import as_content
+from .defaults import default_judge
 from .facets import to_choice, to_score
 from .judges.base import ChoiceAnswer, Judge, NoulAnswer, Question, ScoreAnswer
 from .result import Choice, Score
 
-_default: Judge | None = None
-
-
-def _judge(judge: Judge | None) -> Judge:
-    global _default
-    if judge is not None:
-        return judge
-    if _default is None:
-        from .judges.jev import JevJudge
-
-        _default = JevJudge()
-    return _default
-
 
 def _ask(content: Any, questions: dict[str, Question], judge: Judge | None) -> Any:
-    return _judge(judge).ask(as_content(content).as_state(), questions).answers
+    backend = judge or default_judge()
+    return backend.ask(as_content(content).as_state(), questions).answers
 
 
 def choose(

@@ -94,3 +94,39 @@ def test_fake_score_spreads_between_levels():
     res = FakeJudge({"s": 1.25}).ask("x", {"s": Question("score", "?", ["a", "b", "c"])})
     a = res.answers["s"]
     assert a.score == pytest.approx(1.25) and a.probabilities == {0: 0.0, 1: 0.75, 2: 0.25}
+
+
+def test_jev_judge_passes_api_key_to_client(monkeypatch):
+    import typesafe_sdk
+
+    seen = {}
+
+    class Client:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+    monkeypatch.setattr(typesafe_sdk, "TypeSafeClient", Client)
+    assert isinstance(JevJudge(api_key="k-123", timeout=5.0).client, Client)
+    assert seen == {"api_key": "k-123", "timeout": 5.0}
+
+
+def test_jev_judge_client_and_options_are_exclusive():
+    with pytest.raises(ValueError):
+        JevJudge(api_key="k", client=StubClient())
+
+
+def test_configure_sets_default_for_helpers_and_filters():
+    from jevfilter import defaults
+
+    fake = FakeJudge({"choice": "b", "T/membership": 0.9})
+    try:
+        jf.configure(judge=fake)
+        assert jf.choose("x", ["a", "b"]).value == "b"
+        assert jf.Filter(jf.Topic(name="T", description="d")).judge("x")["T"].matched
+        jf.configure(api_key="k-123", model="jev-1.13.0")
+        assert isinstance(defaults.default_judge(), JevJudge)
+        assert defaults.default_judge().model == "jev-1.13.0"
+        with pytest.raises(ValueError):
+            jf.configure(judge=fake, api_key="k")
+    finally:
+        defaults.reset()
