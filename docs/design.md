@@ -276,7 +276,14 @@ overall:
 - cost, tokens, requests
 - optional threshold sweep (accept × reject grid, reject ≤ accept),
   re-deciding membership from stored probabilities with no new calls;
-  `format()` shows only the non-dominated rows
+  `format()` shows only the non-dominated rows. It runs pooled and per
+  topic, since topics are calibrated differently and each topic can
+  already override `thresholds`
+- optional `holdout` (fraction, `seed`): the sweep tunes on the rest and
+  re-scores every row on the held-out share, so the chosen thresholds
+  aren't judged on the data they were picked from. The split is
+  stratified by which topics should match. Headline metrics use every
+  example, since they aren't tuned
 
 Backend errors are left out of calibration and the sweep. Pass
 `results=` to re-score a previous run; use `RecordingJudge` so re-running
@@ -409,7 +416,7 @@ the app:
 
 ## Status
 
-Built (0.1.0, plus 0.2.0–0.4.0 below):
+Built (0.1.0, plus 0.2.0–0.5.0 below):
 
 - `Topic`: validation (all problems at once, typo hints), warnings,
   YAML / JSON / dict loading, round-trip, version.
@@ -455,6 +462,11 @@ Added in 0.4.0:
   staged mode 31% fewer billed tokens with identical accuracy on a
   10-email mix; category examples moved "thanks for applying" from
   recruiter (0.63) to applied (0.99).
+
+Added in 0.5.0:
+
+- Per-topic threshold sweeps (`Report.topic_sweeps`) and `holdout=` /
+  CLI `--holdout` for tuning on one split and checking on another.
 
 Not yet: judging nested categories (parsed, but rejected at judge time),
 extractors (generic ones only: `email`, `url`, `known_values`, `regex`),

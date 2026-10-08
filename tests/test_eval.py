@@ -111,6 +111,45 @@ def test_sweep_needs_no_new_calls():
     assert frontier(report.sweep)
 
 
+def test_per_topic_sweep():
+    report = evaluate(jf.Filter(TOPICS, judge=judge()), make_examples(), sweep=True)
+    assert set(report.topic_sweeps) == {"Jobs", "Receipts"}
+    jobs = report.topic_sweeps["Jobs"]
+    assert all(r.topic == "Jobs" for r in jobs) and len(jobs) == len(report.sweep)
+    row = next(r for r in jobs if r.accept == 0.7 and r.reject == 0.3)
+    c = report.topics["Jobs"].membership
+    assert (row.precision, row.recall, row.review_rate) == (c.precision, c.recall, c.review_rate)
+    # Receipts is never true and always p=0: every row decides all as "no"
+    assert all(r.review_rate == 0 and r.recall is None for r in report.topic_sweeps["Receipts"])
+    assert report.sweep[0].topic is None and report.sweep[0].held_out is None
+
+
+def test_holdout_tunes_and_scores_on_separate_examples():
+    exs = make_examples() * 3  # 15 positives, 9 negatives
+    report = evaluate(jf.Filter(TOPICS, judge=judge()), exs, sweep=True, holdout=1 / 3)
+    assert (report.tune_examples, report.held_out_examples) == (16, 8)
+    row = next(r for r in report.topic_sweeps["Jobs"] if r.accept == 0.7 and r.reject == 0.3)
+    assert row.held_out is not None and row.held_out.n == 8
+    assert row.held_out.tp + row.held_out.fn + row.held_out.review_pos == 5  # stratified
+    same = evaluate(jf.Filter(TOPICS, judge=judge()), exs, sweep=True, holdout=1 / 3)
+    assert same.to_dict() == report.to_dict()  # fixed by seed
+    assert "held out" in report.format()
+    json.dumps(report.to_dict())
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"holdout": 0.3}, "sweep=True"),
+        ({"sweep": True, "holdout": 1.0}, "between 0 and 1"),
+        ({"sweep": True, "holdout": 0.01}, "no examples on one side"),
+    ],
+)
+def test_holdout_errors(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        evaluate(jf.Filter(TOPICS, judge=judge()), make_examples(), **kwargs)
+
+
 def test_rescore_from_saved_results():
     f = jf.Filter(TOPICS, judge=judge())
     exs = make_examples()

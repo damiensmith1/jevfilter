@@ -264,7 +264,14 @@ from jevfilter.eval import evaluate, load_examples
 report = evaluate(f, load_examples("labelled.jsonl"), sweep=True)
 print(report.format())      # precision, recall, review rate, category accuracy,
 report.to_dict()            # calibration, cost, and the best threshold trade-offs
+
+report = evaluate(f, examples, sweep=True, holdout=0.3)   # tune on 70%, check on 30%
+report.topic_sweeps["Jobs"]  # per-topic rows; each has .held_out counts
 ```
+
+The sweep runs pooled and per topic. Put a topic's chosen pair in its
+`thresholds: {accept, reject}`. Trust the held-out columns over the
+tuning ones: the tuning numbers are picked to look good.
 
 A topic missing from `expected` should not match. Use a `RecordingJudge`
 so re-running (or passing `results=` from a previous run) costs nothing.
@@ -278,6 +285,7 @@ jevfilter explain topics/ --file email.json --payloads  # requests + cost; sends
 jevfilter lint topics/                                  # exit 2 on invalid topics
 jevfilter eval topics/ labelled.jsonl --sweep --record runs/cassette.jsonl
 jevfilter eval topics/ labelled.jsonl --replay runs/cassette.jsonl   # free re-run
+jevfilter eval topics/ labelled.jsonl --holdout 0.3 --replay runs/cassette.jsonl
 ```
 
 Options for `try` / `eval`: `--model`, `--max-usd` (spend cap),

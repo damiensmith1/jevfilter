@@ -5,6 +5,7 @@ jevfilter try topics/ "Your application to Acme was received"
 jevfilter explain topics/ --file email.json
 jevfilter lint topics/
 jevfilter eval topics/ labelled.jsonl --sweep --record runs/cassette.jsonl
+jevfilter eval topics/ labelled.jsonl --holdout 0.3 --replay runs/cassette.jsonl
 ```
 
 The API key comes from `TYPESAFE_API_KEY`. Nothing reads `.env` unless you
@@ -96,6 +97,13 @@ def _parser() -> argparse.ArgumentParser:
     common(e, content=False)
     e.add_argument("data", help="labelled examples (JSONL)")
     e.add_argument("--sweep", action="store_true", help="also sweep membership thresholds")
+    e.add_argument(
+        "--holdout",
+        type=float,
+        metavar="FRACTION",
+        help="tune the sweep on the rest and score it on this share (implies --sweep)",
+    )
+    e.add_argument("--seed", type=int, default=0, help="seed for the --holdout split")
     backend(e)
     e.set_defaults(run=_eval)
     return p
@@ -162,7 +170,13 @@ def _lint(args: argparse.Namespace) -> int:
 def _eval(args: argparse.Namespace) -> int:
     from .eval import evaluate, load_examples
 
-    report = evaluate(_filter(args), load_examples(args.data), sweep=args.sweep)
+    report = evaluate(
+        _filter(args),
+        load_examples(args.data),
+        sweep=args.sweep or args.holdout is not None,
+        holdout=args.holdout,
+        seed=args.seed,
+    )
     if args.json:
         _print_json(report.to_dict())
     else:

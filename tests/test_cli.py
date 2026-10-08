@@ -99,6 +99,8 @@ def test_eval(capsys, fake_jev, tmp_path):
     )
     code, out, _ = run(capsys, "eval", TOPICS, str(data), "--sweep")
     assert code == 0 and "2 examples" in out and "threshold sweep" in out
+    code, out, _ = run(capsys, "eval", TOPICS, str(data), "--holdout", "0.5")
+    assert code == 0 and "held out" in out
     code, out, _ = run(capsys, "eval", TOPICS, str(data), "--json")
     assert json.loads(out)["topics"]["Jobs"]["category_accuracy"] == 1.0
 

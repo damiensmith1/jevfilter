@@ -113,7 +113,8 @@ jevfilter eval topics/ labelled.jsonl --sweep --record runs/cassette.jsonl
 ```
 
 `eval` scores your topics against labelled examples (precision, recall,
-review rate, calibration) and shows which thresholds trade off best.
+review rate, calibration) and shows which thresholds trade off best,
+per topic. Add `--holdout 0.3` to check them on examples they weren't tuned on.
 
 ## Testing without an API key
 
